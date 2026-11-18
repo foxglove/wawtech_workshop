@@ -2,9 +2,9 @@
 
 Scalar topics use the ``lerobot.Scalars`` JSON schema from LeRobot's Foxglove
 integration. Camera topics carry ``foxglove.CompressedVideo`` messages with
-``format`` ``h264``. The recorder writes an ``episode`` metadata record. Whether
-a Foxglove ``/v1/data/stream`` download preserves that record is unverified; the
-converter does not depend on it.
+``format`` ``h264``. The recorder writes an ``episode`` metadata record. Episodes
+read through the Foxglove SDK's dataset reader carry messages only, so the
+converter does not depend on that record.
 """
 
 from __future__ import annotations

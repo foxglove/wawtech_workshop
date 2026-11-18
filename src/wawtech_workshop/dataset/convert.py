@@ -14,13 +14,12 @@ Camera frames are decoded one image at a time. Each camera keeps the latest
 decoded frame whose log time is at or before the current grid time, and drops
 the previous image. The first grid time still needs a frame at or before it.
 
-An ``episode`` metadata record is optional. Whether a Foxglove data-stream
-download preserves the recorder's record is unverified, and conversion does not
-depend on it. When the record is present it supplies ``task`` and
-``episode_index`` and is checked against the labels and camera topics in the
-file. Otherwise the task comes from :class:`EpisodeInput`, then
-``default_task``, and the episode index comes from :class:`EpisodeInput` or the
-position in the input list.
+An ``episode`` metadata record is optional. Episodes read through the Foxglove
+SDK's dataset reader carry messages only, so conversion does not depend on it.
+When the record is present it supplies ``task`` and ``episode_index`` and is
+checked against the labels and camera topics in the file. Otherwise the task
+comes from :class:`EpisodeInput`, then ``default_task``, and the episode index
+comes from :class:`EpisodeInput` or the position in the input list.
 
 LeRobot assigns dataset episode indices ``0 .. N-1`` in ascending resolved
 ``episode_index`` order. The task string on every frame is the resolved task.

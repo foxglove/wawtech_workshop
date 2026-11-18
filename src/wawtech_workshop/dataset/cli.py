@@ -9,12 +9,10 @@ import tempfile
 from pathlib import Path
 
 from wawtech_workshop.dataset.convert import EpisodeInput, convert_episodes
-from wawtech_workshop.dataset.foxglove_api import (
-    ApiEpisode,
+from wawtech_workshop.dataset.foxglove_source import (
     SelectionReport,
-    download_episode,
-    list_version_episodes,
-    select_episodes,
+    default_topics,
+    fetch_episodes,
 )
 
 
@@ -52,11 +50,6 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the selection report and the episodes that would be downloaded.",
     )
-    parser.add_argument(
-        "--allow-missing",
-        action="store_true",
-        help="Convert episodes even when the API reports missing recordings.",
-    )
     parser.add_argument("--output", type=Path, help="LeRobot dataset directory to create.")
     parser.add_argument("--repo-id", help="LeRobot repo id stored in the dataset.")
     parser.add_argument("--fps", type=int, default=30)
@@ -64,7 +57,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--topics",
         nargs="*",
         default=None,
-        help="Topics to download and convert. Default: detect state, action, and image topics.",
+        help=(
+            "Topics to download and convert. Default: with --mcap-dir, detect state, action, "
+            "and image topics; with --dataset-id, state, action, and one image topic per "
+            "--cameras name."
+        ),
+    )
+    parser.add_argument(
+        "--cameras",
+        nargs="+",
+        default=["front"],
+        help="Cameras to download with --dataset-id when --topics is unset (default: front).",
     )
     parser.add_argument("--robot-type", default="rebot_b601_follower")
     parser.add_argument("--max-gap-s", type=float, default=0.25)
@@ -82,7 +85,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def _print_report(report: SelectionReport) -> None:
     print(f"kept: {len(report.kept)}")
     for episode in report.kept:
-        print(f"  {episode.id} version={episode.version} start={episode.start} end={episode.end}")
+        start = episode.start.isoformat()
+        end = episode.end.isoformat()
+        print(f"  {episode.id} start={start} end={end}")
     print(f"rejected: {len(report.rejected_ids)} {', '.join(report.rejected_ids)}".rstrip())
     print(
         f"unlabeled: {report.unlabeled_count} (excluded, missing outcome) "
@@ -99,24 +104,17 @@ def _run(argv: list[str] | None) -> None:
             raise ValueError("--version is required with --dataset-id.")
         if not os.environ.get("FOXGLOVE_API_TOKEN"):
             raise RuntimeError("FOXGLOVE_API_TOKEN is not set.")
-        episodes = list_version_episodes(args.dataset_id, args.version)
-        report = select_episodes(
-            episodes,
-            outcome_key=args.outcome_key,
-            keep_values=tuple(args.keep_outcomes),
-            allow_missing=args.allow_missing,
-        )
+        topics = args.topics or default_topics(args.cameras)
         if args.dry_run:
-            _print_report(report)
+            _print_report(_fetch(args, topics, None))
             return
         if args.output is None or args.repo_id is None:
             raise ValueError("--output and --repo-id are required unless --dry-run is set.")
         if args.project_dir is not None:
-            args.project_dir.mkdir(parents=True, exist_ok=True)
-            _download_and_convert(args, report.kept, args.project_dir)
+            _download_and_convert(args, topics, args.project_dir)
             return
         with tempfile.TemporaryDirectory(prefix="wawtech-episodes-") as temporary:
-            _download_and_convert(args, report.kept, Path(temporary))
+            _download_and_convert(args, topics, Path(temporary))
         return
     if args.dry_run:
         raise ValueError("--dry-run applies to --dataset-id, not --mcap-dir.")
@@ -137,14 +135,24 @@ def _run(argv: list[str] | None) -> None:
     )
 
 
-def _download_and_convert(
-    args: argparse.Namespace, episodes: list[ApiEpisode], directory: Path
-) -> None:
-    sources: list[EpisodeInput] = []
-    for index, episode in enumerate(episodes):
-        dest = directory / f"{episode.id}.mcap"
-        download_episode(episode, dest, topics=args.topics)
-        sources.append(EpisodeInput(path=dest, task=episode.task, episode_index=index))
+def _fetch(args: argparse.Namespace, topics: list[str], directory: Path | None) -> SelectionReport:
+    return fetch_episodes(
+        args.dataset_id,
+        args.version,
+        topics,
+        download_dir=directory,
+        outcome_key=args.outcome_key,
+        keep_values=tuple(args.keep_outcomes),
+    )
+
+
+def _download_and_convert(args: argparse.Namespace, topics: list[str], directory: Path) -> None:
+    report = _fetch(args, topics, directory)
+    sources = [
+        EpisodeInput(path=episode.path, task=episode.task, episode_index=index)
+        for index, episode in enumerate(report.kept)
+        if episode.path is not None
+    ]
     if not sources:
         raise ValueError("No episodes left to download after outcome filtering.")
     convert_episodes(
@@ -154,7 +162,7 @@ def _download_and_convert(
         fps=args.fps,
         robot_type=args.robot_type,
         max_gap_s=args.max_gap_s,
-        topics=args.topics,
+        topics=topics,
         default_task=args.task,
     )
 

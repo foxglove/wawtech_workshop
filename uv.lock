@@ -31,6 +31,19 @@ wheels = [
 ]
 
 [[package]]
+name = "arrow"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+    { name = "tzdata" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b9/33/032cdc44182491aa708d06a68b62434140d8c50820a087fac7af37703357/arrow-1.4.0.tar.gz", hash = "sha256:ed0cc050e98001b8779e84d461b0098c4ac597e88704a655582b21d116e526d7", size = 152931, upload-time = "2025-10-18T17:46:46.761Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ed/c9/d7977eaacb9df673210491da99e6a247e93df98c715fc43fd136ce1d3d33/arrow-1.4.0-py3-none-any.whl", hash = "sha256:749f0769958ebdc79c173ff0b0670d59051a535fa26e8eba02953dc19eb43205", size = 68797, upload-time = "2025-10-18T17:46:45.663Z" },
+]
+
+[[package]]
 name = "av"
 version = "15.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -416,6 +429,22 @@ wheels = [
 ]
 
 [[package]]
+name = "foxglove-client"
+version = "0.24.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "arrow" },
+    { name = "certifi" },
+    { name = "mcap" },
+    { name = "requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/94/19/54b0fceda7c3f3811c4aac0ebbfad4b942993b2cb2953a3fb16566389920/foxglove_client-0.24.0.tar.gz", hash = "sha256:b7e15a8fb6e02ee758d6cf7a59fdd60ed528555bd7abf5ca944c22e944b15bbe", size = 65004, upload-time = "2026-11-13T01:27:53.874Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/43/d2/603b114bb80a2f18ecbd116fbb09f9ad71e36d7067262934e09cf7abccf3/foxglove_client-0.24.0-py3-none-any.whl", hash = "sha256:9d75f18bd8851de4e0db263dd41b6e6115efc30e8c8c9a1e30b52b792caa9103", size = 36384, upload-time = "2026-11-13T01:27:52.282Z" },
+]
+
+[[package]]
 name = "foxglove-sdk"
 version = "0.31.0"
 source = { registry = "https://pypi.org/simple" }
@@ -433,6 +462,14 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/ec/3bfa1a8d796b827d75294387c83214744352b691696caf72b337f6ad7d71/foxglove_sdk-0.31.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:3963fcca66fe3bdb8c73ec47936ea1246c5141257431c7f97bbac2c1b52fe652", size = 4127762, upload-time = "2026-11-13T22:08:23.599Z" },
     { url = "https://files.pythonhosted.org/packages/89/91/a6537c1a8c0618738ee9a979a05f25162cf640aacea3e0b719467a725033/foxglove_sdk-0.31.0-cp310-abi3-win32.whl", hash = "sha256:fd2f7df8215e2d919256022378f17b523a06f64281db2905e0cc7528dce5003e", size = 2456943, upload-time = "2026-11-13T22:08:25.186Z" },
     { url = "https://files.pythonhosted.org/packages/36/f6/0c310226f543a50628ffb8d486257a6fb907cf313eba3366e58460de51e3/foxglove_sdk-0.31.0-cp310-abi3-win_amd64.whl", hash = "sha256:cb72b2b5b439c7aa0c85d680e286c8d3c4bf4e3adc88e0b8f51789c6653a7f23", size = 16558294, upload-time = "2026-11-13T22:08:27.842Z" },
+]
+
+[package.optional-dependencies]
+torch = [
+    { name = "foxglove-client" },
+    { name = "mcap" },
+    { name = "pyarrow" },
+    { name = "torch" },
 ]
 
 [[package]]
@@ -1856,7 +1893,7 @@ source = { editable = "." }
 dependencies = [
     { name = "av" },
     { name = "datasets" },
-    { name = "foxglove-sdk" },
+    { name = "foxglove-sdk", extra = ["torch"] },
     { name = "lerobot", extra = ["rebot"] },
     { name = "lerobot-camera-orbbec" },
     { name = "mcap" },
@@ -1875,7 +1912,7 @@ dev = [
 requires-dist = [
     { name = "av", specifier = ">=15,<16" },
     { name = "datasets", specifier = ">=4.8.0,<6" },
-    { name = "foxglove-sdk", specifier = "==0.31.0" },
+    { name = "foxglove-sdk", extras = ["torch"], specifier = "==0.31.0" },
     { name = "lerobot", extras = ["rebot"], specifier = "==0.7.0" },
     { name = "lerobot-camera-orbbec", editable = "packages/lerobot_camera_orbbec" },
     { name = "mcap" },
