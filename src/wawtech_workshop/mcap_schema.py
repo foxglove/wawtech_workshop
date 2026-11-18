@@ -15,6 +15,8 @@ from dataclasses import dataclass
 TOPIC_OBSERVATION_STATE = "/observation/state"
 TOPIC_ACTION_STATE = "/action/state"
 EPISODE_METADATA_NAME = "episode"
+# Recorder-only record: outcome label and session bookkeeping. The converter ignores it.
+RECORDING_METADATA_NAME = "recording"
 SCALARS_SCHEMA_NAME = "lerobot.Scalars"
 COMPRESSED_VIDEO_SCHEMA_NAME = "foxglove.CompressedVideo"
 
