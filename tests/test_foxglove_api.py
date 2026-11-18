@@ -156,7 +156,7 @@ def test_select_episodes_missing_recordings_raises_only_for_kept() -> None:
     assert allowed.kept_ids == ["gone"]
 
 
-def test_device_id_requires_exactly_one_device(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_device_id_is_display_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FOXGLOVE_API_URL", "https://api.example.test")
 
     def opener_for(row: dict[str, object]) -> object:
@@ -183,8 +183,8 @@ def test_device_id_requires_exactly_one_device(monkeypatch: pytest.MonkeyPatch) 
         outcome="success",
         device_ids=["dev-a", "dev-b"],
     )
-    with pytest.raises(ValueError, match="exactly one device"):
-        list_version_episodes("ds", 1, token=TOKEN, opener=opener_for(multiple))
+    episodes = list_version_episodes("ds", 1, token=TOKEN, opener=opener_for(multiple))
+    assert episodes[0].device_id is None
 
     empty = _episode_row(
         "none",
@@ -193,8 +193,8 @@ def test_device_id_requires_exactly_one_device(monkeypatch: pytest.MonkeyPatch) 
         outcome="success",
         device_ids=[],
     )
-    with pytest.raises(ValueError, match="none"):
-        list_version_episodes("ds", 1, token=TOKEN, opener=opener_for(empty))
+    episodes = list_version_episodes("ds", 1, token=TOKEN, opener=opener_for(empty))
+    assert episodes[0].device_id is None
 
 
 def test_errors_redact_the_api_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -227,7 +227,7 @@ def test_download_episode_streams_and_retries(
                 return MemoryResponse(503, {}, b"unavailable")
             assert TOKEN in request.headers["Authorization"]
             body = json.loads(request.body or b"{}")
-            assert body["deviceId"] == "dev"
+            assert body == {"episodeId": "ep-1", "episodeVersion": 1, "outputFormat": "mcap"}
             assert body["outputFormat"] == "mcap"
             assert "topics" not in body
             return MemoryResponse(

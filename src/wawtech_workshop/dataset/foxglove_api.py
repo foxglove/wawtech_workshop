@@ -120,7 +120,7 @@ class ApiEpisode:
     start: str
     end: str
     properties: dict[str, object]
-    device_id: str
+    device_id: str | None
     has_missing_recordings: bool
     added_at: str
 
@@ -155,20 +155,18 @@ class SelectionReport:
         return [episode.id for episode in self.kept]
 
 
-def _device_id(episode_id: str, recordings: list[dict[str, object]]) -> str:
+def _device_id(recordings: list[dict[str, object]]) -> str | None:
+    """Return the one device the episode's recordings came from, or None.
+
+    Only used for display. Downloads are scoped by episode id and version, so an
+    episode that spans several devices, or none, still converts.
+    """
     found: list[str] = []
     for recording in recordings:
         device_id = recording.get("deviceId")
-        if isinstance(device_id, str) and device_id:
-            if device_id not in found:
-                found.append(device_id)
-    if len(found) != 1:
-        observed = found or "none"
-        raise ValueError(
-            f"Episode {episode_id} must span exactly one device, found {observed} "
-            f"across {len(recordings)} recording(s)."
-        )
-    return found[0]
+        if isinstance(device_id, str) and device_id and device_id not in found:
+            found.append(device_id)
+    return found[0] if len(found) == 1 else None
 
 
 def _parse_episode_row(row: dict[str, object]) -> ApiEpisode:
@@ -198,7 +196,7 @@ def _parse_episode_row(row: dict[str, object]) -> ApiEpisode:
         start=start,
         end=end,
         properties=dict(properties),
-        device_id=_device_id(episode_id, recording_rows),
+        device_id=_device_id(recording_rows),
         has_missing_recordings=bool(row.get("hasMissingRecordings", False)),
         added_at=str(added_at) if added_at is not None else "",
     )
@@ -389,7 +387,7 @@ def download_episode(
     max_retries: int = 3,
     sleeper: Sleeper | None = None,
 ) -> Path:
-    """Download one episode's MCAP via ``POST /v1/data/stream`` and the signed link.
+    """Download one episode version's MCAP via ``POST /v1/data/stream`` and the signed link.
 
     Bytes are streamed to a temporary file next to ``dest`` and renamed into
     place. Retries with exponential backoff cover HTTP 429 and 5xx. The bearer
@@ -398,10 +396,12 @@ def download_episode(
     resolved_token = _resolve_token(token)
     http = opener or _urllib_opener
     pause = sleeper or time.sleep
+    # Scope the stream to the episode version pinned by the dataset version, the
+    # same request the Foxglove SDK's dataset reader makes through foxglove-client.
+    # The server uses that episode's time range and recordings.
     payload: dict[str, object] = {
-        "deviceId": episode.device_id,
-        "start": episode.start,
-        "end": episode.end,
+        "episodeId": episode.id,
+        "episodeVersion": episode.version,
         "outputFormat": "mcap",
     }
     if topics is not None:

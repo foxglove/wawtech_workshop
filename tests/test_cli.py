@@ -53,7 +53,7 @@ def test_dry_run_prints_selection_without_download(
     cli.main(["--dataset-id", "ds", "--version", "2", "--dry-run"])
     output = capsys.readouterr().out
     assert "ep-9" in output
-    assert "device-7" in output
+    assert "ep-9 version=2" in output
     assert "ep-no" in output
     assert "ep-blank" in output
     assert "dry-run: not downloading" in output

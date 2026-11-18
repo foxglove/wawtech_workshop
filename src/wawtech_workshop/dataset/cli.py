@@ -82,7 +82,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _print_report(report: SelectionReport) -> None:
     print(f"kept: {len(report.kept)}")
     for episode in report.kept:
-        print(f"  {episode.id} device={episode.device_id} start={episode.start} end={episode.end}")
+        print(f"  {episode.id} version={episode.version} start={episode.start} end={episode.end}")
     print(f"rejected: {len(report.rejected_ids)} {', '.join(report.rejected_ids)}".rstrip())
     print(
         f"unlabeled: {report.unlabeled_count} (excluded, missing outcome) "
