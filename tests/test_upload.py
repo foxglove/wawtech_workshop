@@ -27,6 +27,21 @@ class FakeUploadClient:
     staged: list[dict[str, Any]] = field(default_factory=list)
     commits: list[dict[str, Any]] = field(default_factory=list)
     polls: int = 0
+    # Episode custom properties the org defines; None makes listing them fail.
+    property_keys: list[str] | None = field(default_factory=lambda: ["task", "outcome"])
+    created_properties: list[dict[str, Any]] = field(default_factory=list)
+
+    def get_custom_properties(self, *, resource_type: str) -> list[dict[str, Any]]:
+        assert resource_type == "episode"
+        if self.property_keys is None:
+            raise RuntimeError("403 Forbidden")
+        return [{"key": key, "resource_type": "episode"} for key in self.property_keys]
+
+    def create_custom_property(self, **kwargs: Any) -> dict[str, Any]:
+        assert self.property_keys is not None
+        self.created_properties.append(kwargs)
+        self.property_keys.append(kwargs["key"])
+        return {"id": f"prop-{kwargs['key']}", **kwargs}
 
     def get_dataset(self, *, dataset_id: str) -> dict[str, Any]:
         return {"id": dataset_id, "project_id": "proj-from-dataset"}
@@ -68,7 +83,7 @@ class FakeUploadClient:
 
 
 def _recorded(tmp_path: Path, keys: dict[int, str] | None = None) -> Path:
-    _record(tmp_path, num_episodes=2, episode_time_s=0.2, keys=keys, cameras=("front",))
+    _record(tmp_path, num_episodes=2, episode_time_s=0.2, keys=keys, cameras=("wrist",))
     return tmp_path / "episodes"
 
 
@@ -215,3 +230,88 @@ def test_mcap_dir_conversion_skips_failed_recordings(
 
     dataset = LeRobotDataset("local/kept", root=output, video_backend="pyav")
     assert dataset.meta.total_episodes == 1
+
+
+def test_org_without_properties_uploads_successes_unlabeled(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    episodes = _recorded(tmp_path, keys={2: "f"})
+    client = FakeUploadClient(property_keys=[])
+    assert upload.run([str(episodes), "--dataset-id", "ds"], client=client) == 0
+    out = capsys.readouterr().out
+    assert "no episode properties ['task', 'outcome']" in out
+    assert "--keep-unlabeled" in out
+    assert "pass --task to build-dataset" in out
+    # The failure is not uploaded, since nothing in the org would mark it.
+    assert [item["key"] for item in client.uploads] == ["episode_0001_test"]
+    assert client.created[0]["episodes"] == [{"recordings": ["rec-episode_0001_test"]}]
+    assert client.created_properties == []
+
+
+def test_org_with_task_only_keeps_task(tmp_path: Path) -> None:
+    episodes = _recorded(tmp_path)
+    client = FakeUploadClient(property_keys=["task"])
+    upload.run([str(episodes), "--dataset-id", "ds", "--outcomes", "success"], client=client)
+    assert client.created[0]["episodes"][0] == {
+        "recordings": ["rec-episode_0000_test"],
+        "properties": {"task": "pick up the butter"},
+    }
+
+
+def test_unlisted_properties_degrade_to_none(tmp_path: Path) -> None:
+    episodes = _recorded(tmp_path)
+    client = FakeUploadClient(property_keys=None)
+    upload.run([str(episodes), "--dataset-id", "ds"], client=client)
+    assert all("properties" not in episode for episode in client.created[0]["episodes"])
+
+
+def test_create_properties(tmp_path: Path) -> None:
+    episodes = _recorded(tmp_path, keys={2: "f"})
+    client = FakeUploadClient(property_keys=["task"])
+    upload.run([str(episodes), "--dataset-id", "ds", "--create-properties"], client=client)
+    assert client.created_properties == [
+        {
+            "key": "outcome",
+            "resource_type": "episode",
+            "label": "Outcome",
+            "value_type": "enum",
+            "enum_values": ["success", "failure"],
+        }
+    ]
+    assert [episode["properties"]["outcome"] for episode in client.created[0]["episodes"]] == [
+        "failure",
+        "success",
+    ]
+
+
+def test_unlabeled_dataset_episodes_need_keep_unlabeled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    episodes_dir = _recorded(tmp_path)
+    local = upload.find_episodes([episodes_dir])
+    fake = FakeClient(
+        [FakeEpisode(f"ep-{episode.episode_index}", {}, mcap=episode.path) for episode in local]
+    )
+    monkeypatch.setenv("FOXGLOVE_API_TOKEN", "token")
+    monkeypatch.setattr(foxglove_source, "make_client", lambda: fake)
+    base = ["--dataset-id", "ds", "--version", "1", "--project-dir", str(tmp_path / "dl")]
+    with pytest.raises(ValueError, match="No episodes left"):
+        dataset_cli._run([*base, "--output", str(tmp_path / "none"), "--repo-id", "local/none"])
+    output = tmp_path / "dataset"
+    dataset_cli.main(
+        [
+            *base,
+            "--keep-unlabeled",
+            "--task",
+            "pick up the butter",
+            "--output",
+            str(output),
+            "--repo-id",
+            "local/unlabeled",
+        ]
+    )
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    dataset = LeRobotDataset("local/unlabeled", root=output, video_backend="pyav")
+    assert dataset.meta.total_episodes == 2
+    assert dataset[0]["task"] == "pick up the butter"

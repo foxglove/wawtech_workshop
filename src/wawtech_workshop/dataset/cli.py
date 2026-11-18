@@ -47,6 +47,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--outcome-key", default="outcome", help="Episode property used as the outcome."
     )
     parser.add_argument(
+        "--keep-unlabeled",
+        action="store_true",
+        help=(
+            "With --dataset-id, also keep episodes that have no outcome property, for an "
+            "org without one. Curate the dataset version by hand first."
+        ),
+    )
+    parser.add_argument(
         "--project-dir",
         type=Path,
         help="Directory for MCAPs downloaded from Foxglove. Defaults to a temporary directory.",
@@ -72,8 +80,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cameras",
         nargs="+",
-        default=["front"],
-        help="Cameras to download with --dataset-id when --topics is unset (default: front).",
+        default=["wrist"],
+        help="Cameras to download with --dataset-id when --topics is unset (default: wrist).",
     )
     parser.add_argument("--robot-type", default="rebot_b601_follower")
     parser.add_argument("--max-gap-s", type=float, default=0.25)
@@ -175,6 +183,7 @@ def _fetch(args: argparse.Namespace, topics: list[str], directory: Path | None) 
         download_dir=directory,
         outcome_key=args.outcome_key,
         keep_values=tuple(args.keep_outcomes),
+        keep_unlabeled=args.keep_unlabeled,
     )
 
 

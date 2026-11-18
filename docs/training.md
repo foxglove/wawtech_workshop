@@ -8,7 +8,7 @@ Both paths start from the same LeRobot v3 dataset:
 uv run record-episode ...                       # MCAPs in data/episodes
 uv run upload-episodes data/episodes --dataset-id <id>   # optional: curate in Foxglove, commit
 uv run build-dataset --dataset-id <id> --version <n> \
-    --cameras front wrist --output outputs/dataset --repo-id local/rebot_b601
+    --cameras wrist --output outputs/dataset --repo-id local/rebot_b601
 # or, without Foxglove: uv run build-dataset --mcap-dir data/episodes ...
 ```
 
@@ -44,7 +44,7 @@ lerobot-train \
 
 - 2B-parameter vision-language backbone plus a 300M action expert. A full fine-tune is sized for one 80 GB GPU (A100 or H100). To fit a smaller card, add `--policy.train_expert_only=true` or `--policy.freeze_vision_encoder=true`, or LoRA with `--policy.use_peft=true` (`lerobot[peft]`).
 - Needs a Hugging Face token that has accepted the gated PaliGemma licence (the tokenizer is `google/paligemma-3b-pt-224`).
-- π₀.₅ was pretrained with three camera views. With one or two cameras, `--policy.empty_cameras=<n>` pads the missing views.
+- π₀.₅ was pretrained with three camera views. With the wrist camera alone, `--policy.empty_cameras=2` pads the missing views (`1` with wrist and front). A wrist-only view is the weakest setup for either policy, since nothing sees where the object is before the gripper is close: if the Orbbec arrives, record the training episodes with `--cameras=wrist,front`.
 - Uses the task string, so one checkpoint can take several tasks (for example "pick up the butter" and "put the butter on the plate").
 
 How it would run on Anyscale:

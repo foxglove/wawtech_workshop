@@ -11,9 +11,18 @@ Steps, each one optional after the first:
 3. With ``--commit``: commit the dataset version so ``build-dataset
    --dataset-id ... --version N`` can read it.
 
-``task`` and ``outcome`` must exist as episode custom properties in the
-Foxglove org (``build-dataset`` filters on ``outcome``). Pass
-``--no-properties`` to create episodes without them and label them in the app.
+``task`` and ``outcome`` are episode custom properties, and only properties the
+org defines can be set. Before staging, the org's episode properties are listed
+and any that are missing are left off with a warning, so an org that is not set
+up yet still works:
+
+* without ``outcome``, only ``success`` episodes are uploaded (unless
+  ``--outcomes`` says otherwise), since nothing would mark the failures later;
+  ``build-dataset --dataset-id`` then needs ``--keep-unlabeled``;
+* without ``task``, ``build-dataset`` needs ``--task``.
+
+``--create-properties`` creates both in the org (``task`` a string, ``outcome``
+an enum of success and failure). Pass ``--no-properties`` to skip properties.
 
 Needs ``FOXGLOVE_API_TOKEN`` (``FOXGLOVE_API_URL`` optional). The token is never
 printed. ``--dry-run`` reads the files and prints the plan without any API call.
@@ -41,6 +50,7 @@ from wawtech_workshop.recorder.session import EPISODE_GLOB
 
 DEFAULT_DEVICE_NAME = "rebot-b601"
 _FAILED_STATUSES = {"failed", "error"}
+OUTCOME_VALUES = ["success", "failure"]
 
 
 @dataclass(frozen=True)
@@ -181,6 +191,61 @@ def stage_in_dataset(
     return episode_ids
 
 
+def episode_property_keys(client: Any, say: Callable[[str], None] = print) -> set[str] | None:
+    """Keys of the org's episode custom properties, or None when they cannot be listed."""
+    try:
+        properties = client.get_custom_properties(resource_type="episode")
+    except Exception as exc:  # noqa: BLE001  (any API failure means "unknown")
+        say(f"Warning: could not list episode properties ({exc}); creating episodes without any.")
+        return None
+    return {str(item["key"]) for item in properties}
+
+
+def create_episode_properties(
+    client: Any,
+    *,
+    task_key: str,
+    outcome_key: str,
+    existing: set[str],
+    say: Callable[[str], None] = print,
+) -> set[str]:
+    """Create the task and outcome episode properties the org is missing."""
+    wanted = [
+        (task_key, {"label": "Task", "value_type": "string"}),
+        (outcome_key, {"label": "Outcome", "value_type": "enum", "enum_values": OUTCOME_VALUES}),
+    ]
+    created = set(existing)
+    for key, options in wanted:
+        if key in created:
+            continue
+        client.create_custom_property(key=key, resource_type="episode", **options)
+        say(f"Created episode property {key!r}.")
+        created.add(key)
+    return created
+
+
+def resolve_property_keys(
+    keys: set[str] | None,
+    *,
+    task_key: str,
+    outcome_key: str,
+    say: Callable[[str], None] = print,
+) -> tuple[str | None, str | None]:
+    """Drop the property keys the org does not define, with one line on what to set up."""
+    available = keys or set()
+    missing = [key for key in (task_key, outcome_key) if key not in available]
+    if keys is not None and missing:
+        say(
+            f"The Foxglove org has no episode properties {missing}; episodes are created "
+            "without them. Run again with --create-properties once the org is set up, or "
+            "add them in the org settings."
+        )
+    return (
+        task_key if task_key in available else None,
+        outcome_key if outcome_key in available else None,
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="upload-episodes",
@@ -206,6 +271,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-properties", action="store_true", help="Create episodes without properties."
     )
     parser.add_argument(
+        "--create-properties",
+        action="store_true",
+        help="Create the task and outcome episode properties in the org if they are missing.",
+    )
+    parser.add_argument(
         "--outcomes",
         nargs="+",
         default=None,
@@ -220,9 +290,9 @@ def run(argv: Sequence[str] | None = None, *, client: Any = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.commit and not args.dataset_id:
         raise SystemExit("--commit needs --dataset-id.")
-    episodes = find_episodes(args.paths)
-    if args.outcomes is not None:
-        episodes = [episode for episode in episodes if episode.outcome in set(args.outcomes)]
+    if args.create_properties and args.no_properties:
+        raise SystemExit("--create-properties and --no-properties contradict each other.")
+    episodes = _filter_outcomes(find_episodes(args.paths), args.outcomes)
     for episode in episodes:
         print(
             f"{episode.path.name}: episode {episode.episode_index}, "
@@ -240,8 +310,31 @@ def run(argv: Sequence[str] | None = None, *, client: Any = None) -> int:
         return 0
     client = client or make_client()
     project_id = args.project_id
-    if args.dataset_id and project_id is None:
-        project_id = client.get_dataset(dataset_id=args.dataset_id)["project_id"]
+    task_key: str | None = None
+    outcome_key: str | None = None
+    if args.dataset_id:
+        if project_id is None:
+            project_id = client.get_dataset(dataset_id=args.dataset_id)["project_id"]
+        if not args.no_properties:
+            keys = episode_property_keys(client)
+            if args.create_properties and keys is not None:
+                keys = create_episode_properties(
+                    client, task_key=args.task_key, outcome_key=args.outcome_key, existing=keys
+                )
+            task_key, outcome_key = resolve_property_keys(
+                keys, task_key=args.task_key, outcome_key=args.outcome_key
+            )
+            if outcome_key is None and args.outcomes is None:
+                episodes = _filter_outcomes(episodes, ["success"])
+                print(
+                    f"Without an outcome property, uploading only the {len(episodes)} success "
+                    "episodes. Build with: build-dataset --dataset-id ... --keep-unlabeled"
+                )
+                if not episodes:
+                    print("Nothing to upload.")
+                    return 0
+            if task_key is None:
+                print("Without a task property, pass --task to build-dataset.")
     upload(client, episodes, device_name=args.device_name, project_id=project_id)
     if not args.dataset_id:
         return 0
@@ -258,8 +351,8 @@ def run(argv: Sequence[str] | None = None, *, client: Any = None) -> int:
         recording_ids,
         dataset_id=args.dataset_id,
         project_id=project_id,
-        task_key=None if args.no_properties else args.task_key,
-        outcome_key=None if args.no_properties else args.outcome_key,
+        task_key=task_key,
+        outcome_key=outcome_key,
     )
     print(f"Staged {len(episode_ids)} episodes in dataset {args.dataset_id}.")
     if args.commit:
@@ -272,6 +365,15 @@ def run(argv: Sequence[str] | None = None, *, client: Any = None) -> int:
     else:
         print("Review the staged episodes in Foxglove, then commit the version there.")
     return 0
+
+
+def _filter_outcomes(
+    episodes: list[LocalEpisode], outcomes: Sequence[str] | None
+) -> list[LocalEpisode]:
+    if outcomes is None:
+        return episodes
+    wanted = set(outcomes)
+    return [episode for episode in episodes if episode.outcome in wanted]
 
 
 def main() -> None:

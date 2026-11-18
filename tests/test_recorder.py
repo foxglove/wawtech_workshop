@@ -301,3 +301,62 @@ def test_encoder_error_surfaces_and_drops_the_episode(tmp_path: Path) -> None:
             session.log_step(1, state=observation, action=action, images={"front": odd})
             session.finish_episode("success")
     assert list((tmp_path / "episodes").glob("*.mcap")) == []
+
+
+def test_wrist_uvc_is_the_default_camera() -> None:
+    from lerobot.cameras.opencv import OpenCVCameraConfig
+    from lerobot_camera_orbbec import OrbbecCameraConfig
+
+    config = cli.RecordEpisodeConfig(robot=object(), teleop=object(), task="t")  # type: ignore[arg-type]
+    cameras = cli.preset_cameras(config)
+    assert list(cameras) == ["wrist"]
+    wrist = cameras["wrist"]
+    assert isinstance(wrist, OpenCVCameraConfig)
+    assert (wrist.index_or_path, wrist.fps, wrist.width, wrist.height) == (0, 30, 640, 480)
+
+    config.cameras = "wrist,front"
+    config.wrist_camera = "/dev/video2"
+    config.front_camera = "CP1234"
+    cameras = cli.preset_cameras(config)
+    assert list(cameras) == ["wrist", "front"]
+    assert cameras["wrist"].index_or_path == Path("/dev/video2")
+    assert isinstance(cameras["front"], OrbbecCameraConfig)
+    assert cameras["front"].serial_number_or_name == "CP1234"
+
+    config.cameras = "side"
+    with pytest.raises(ValueError, match="--robot.cameras"):
+        cli.preset_cameras(config)
+
+
+def test_real_rebot_configs_get_the_wrist_camera(tmp_path: Path) -> None:
+    """The real follower and leader classes, built but not connected, record wrist only."""
+    from lerobot.robots.rebot_b601_follower import RebotB601FollowerRobotConfig
+    from lerobot.teleoperators.rebot_102_leader import RebotArm102LeaderTeleopConfig
+
+    seen = {}
+
+    def make_robot(robot_cfg):
+        from lerobot.robots import make_robot_from_config
+
+        robot = make_robot_from_config(robot_cfg)
+        seen["cameras"] = camera_names_for(robot)
+        raise RuntimeError("stop before connecting")
+
+    config = cli.RecordEpisodeConfig(
+        robot=RebotB601FollowerRobotConfig(port="/dev/null", id="follower"),
+        teleop=RebotArm102LeaderTeleopConfig(port="/dev/null", id="leader"),
+        task="t",
+        output_dir=tmp_path,
+    )
+    with pytest.raises(RuntimeError, match="stop before connecting"):
+        cli.run(config, make_robot=make_robot, listen_keys=False)
+    assert seen["cameras"] == ("wrist",)
+
+    # --robot.cameras wins over the presets.
+    from lerobot.cameras.opencv import OpenCVCameraConfig
+
+    explicit = {"side": OpenCVCameraConfig(index_or_path=1, fps=30, width=640, height=480)}
+    config.robot = RebotB601FollowerRobotConfig(port="/dev/null", cameras=explicit)
+    with pytest.raises(RuntimeError, match="stop before connecting"):
+        cli.run(config, make_robot=make_robot, listen_keys=False)
+    assert seen["cameras"] == ("side",)
