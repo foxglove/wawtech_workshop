@@ -85,6 +85,7 @@ class RecordEpisodeConfig:
     # Control and recording rate. Must match build-dataset --fps.
     fps: int = 30
     num_episodes: int = 1
+    # 0 = no time limit: the episode runs until you press n (success) or f (failure).
     episode_time_s: float = 60.0
     reset_time_s: float = 10.0
     # Outcome for an episode that runs out of time without n or f.

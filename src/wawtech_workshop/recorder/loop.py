@@ -5,7 +5,7 @@ action to the follower, and logs state, action and camera images with one wall
 clock timestamp. As in ``lerobot-record``, the recorded action is the leader's
 action before the follower clips it with ``max_relative_target``.
 
-Episode flow: record for up to ``episode_time_s``, then teleop without
+Episode flow: record for up to ``episode_time_s`` (0 = no limit, end it with a key), then teleop without
 recording for ``reset_time_s`` while the scene is reset (``n`` ends the
 reset early). Keys (focus the
 terminal, or any window when pynput can capture):
@@ -156,7 +156,7 @@ def run_phase(
     late = 0
     while True:
         tick_start = clock.monotonic()
-        if tick_start - start >= duration_s:
+        if duration_s > 0 and tick_start - start >= duration_s:
             break
         if controls.episode_should_end():
             break
