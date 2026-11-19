@@ -8,7 +8,7 @@ Robot and teleop flags are the ones ``lerobot-record`` takes, so a working
         --teleop.type=rebot_102_leader --teleop.port=/dev/ttyUSB0 --teleop.id=leader \\
         --task="Pick up the butter and put it on the plate" \\
         --num_episodes=10 --episode_time_s=45 --reset_time_s=10 \\
-        --output_dir=data/episodes --live_port=8765
+        --output_dir=data/episodes
 
 Cameras: without ``--robot.cameras``, ``--cameras`` picks from two presets.
 ``wrist`` (the default) is a UVC camera read through OpenCV at
@@ -20,6 +20,12 @@ overrides the presets entirely.
 The leader is the reBot Arm 102 (``rebot_102_leader``), seven FashionStar UART
 servos driven through ``motorbridge-smart-servo`` from ``lerobot[rebot]``. Its
 joints are the follower's, key for key.
+
+While it runs, the same state, action and camera data is streamed live to the
+Foxglove app on ``ws://127.0.0.1:8765``, including between episodes, so the
+recording doubles as the teleop view. ``--stream_port`` and ``--stream_host``
+move it (``--stream_host=0.0.0.0`` to watch from another machine), and
+``--stream=false`` turns it off.
 
 Files land in ``output_dir`` as ``episode_NNNN_<session>.mcap``. Pass them to
 ``build-dataset --mcap-dir`` directly, or to ``upload-episodes`` to put them in
@@ -87,9 +93,11 @@ class RecordEpisodeConfig:
     start_index: int | None = None
     # Suffix on file names, so several machines can record into one dataset.
     session_id: str | None = None
-    # Serve the recording live to the Foxglove app on this port (off when unset).
-    live_port: int | None = None
-    live_host: str = "127.0.0.1"
+    # Stream the same data live to the Foxglove app while recording, for teleop.
+    # --stream=false records the MCAP files only.
+    stream: bool = True
+    stream_host: str = "127.0.0.1"
+    stream_port: int = 8765
     # Robot type written to the episode record. Must match build-dataset --robot-type.
     robot_type: str | None = None
     # Camera presets used when --robot.cameras is not given: "wrist" (UVC through
@@ -127,6 +135,26 @@ def preset_cameras(cfg: RecordEpisodeConfig) -> dict[str, CameraConfig]:
     return cameras
 
 
+def start_stream(cfg: RecordEpisodeConfig, context: foxglove.Context) -> Any:
+    """Serve ``context`` over the Foxglove WebSocket protocol, so every message the
+    recorder logs reaches both the episode MCAP and any connected Foxglove app."""
+    try:
+        server = foxglove.start_server(
+            name="wawtech recorder",
+            host=cfg.stream_host,
+            port=cfg.stream_port,
+            context=context,
+        )
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"Could not stream on {cfg.stream_host}:{cfg.stream_port} ({exc}). Is another "
+            "recorder or lerobot-teleoperate using it? Pass --stream_port=<port>, or "
+            "--stream=false to record without streaming."
+        ) from exc
+    print(f"Streaming live: open ws://{cfg.stream_host}:{server.port} in Foxglove.")
+    return server
+
+
 def run(
     cfg: RecordEpisodeConfig,
     *,
@@ -149,10 +177,6 @@ def run(
     listener = None
     server = None
     try:
-        teleop.connect()
-        robot.connect()
-        if listen_keys:
-            listener = create_key_listener(controls.on_key, controls_help=CONTROLS_HELP)
         with RecordingSession(
             output_dir=cfg.output_dir,
             fps=cfg.fps,
@@ -162,14 +186,14 @@ def run(
             lerobot_version=lerobot.__version__,
             session_id=cfg.session_id,
         ) as session:
-            if cfg.live_port is not None:
-                server = foxglove.start_server(
-                    name="wawtech recorder",
-                    host=cfg.live_host,
-                    port=cfg.live_port,
-                    context=session.context,
-                )
-                print(f"Live view: open ws://{cfg.live_host}:{cfg.live_port} in Foxglove.")
+            # Bind the stream before the arms connect, so a taken port fails
+            # before torque is on rather than dropping a live arm.
+            if cfg.stream:
+                server = start_stream(cfg, session.context)
+            teleop.connect()
+            robot.connect()
+            if listen_keys:
+                listener = create_key_listener(controls.on_key, controls_help=CONTROLS_HELP)
             print(f"Joints: {', '.join(state_names)}. Cameras: {', '.join(camera_names)}.")
             results = record_episodes(
                 robot,

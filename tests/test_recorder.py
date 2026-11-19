@@ -11,6 +11,7 @@ import pytest
 from mcap.reader import make_reader
 
 from tests.fake_hardware import HEIGHT, WIDTH, FakeFollower, FakeLeader, FakeTime
+from tests.ws_client import FoxgloveTestClient
 from wawtech_workshop.dataset.convert import convert_episodes
 from wawtech_workshop.dataset.video import decode_h264_messages
 from wawtech_workshop.mcap_schema import (
@@ -262,6 +263,7 @@ def test_cli_run_with_fake_devices(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         episode_time_s=0.2,
         reset_time_s=0,
         session_id="cli",
+        stream=False,
     )
     results = cli.run(
         config,
@@ -271,6 +273,127 @@ def test_cli_run_with_fake_devices(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     )
     assert [result.path.name for result in results] == [episode_filename(5, "cli")]
     assert not robot.is_connected and not leader.is_connected
+
+
+STREAM_TOPICS = ["/observation/state", "/action/state", "/observation/images/wrist"]
+
+
+def _streaming_config(tmp_path: Path, **overrides) -> cli.RecordEpisodeConfig:
+    fields = dict(
+        robot=object(),
+        teleop=object(),
+        task="stack the cups",
+        output_dir=tmp_path / "episodes",
+        num_episodes=1,
+        episode_time_s=0.5,
+        reset_time_s=0,
+        session_id="live",
+        stream_port=0,
+    )
+    fields.update(overrides)
+    return cli.RecordEpisodeConfig(**fields)  # type: ignore[arg-type]
+
+
+def test_cli_streams_live_while_writing_the_mcap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Streaming is on by default: a Foxglove client sees state, action and the
+    wrist video while the same messages land in the episode MCAP, and keeps
+    seeing the arm during the reset between episodes, which no file records."""
+    assert cli.RecordEpisodeConfig(robot=object(), teleop=object()).stream  # type: ignore[arg-type]
+    time = FakeTime()
+    robot = FakeFollower(time, cameras=("wrist",))
+    leader = FakeLeader(time)
+    monkeypatch.setattr(cli, "record_episodes", _with_fake_clock(cli.record_episodes, time))
+    clients: list[FoxgloveTestClient] = []
+    start_stream = cli.start_stream
+
+    def start_and_subscribe(cfg, context):
+        server = start_stream(cfg, context)
+        assert not robot.is_connected, "the stream binds before the arms connect"
+        client = FoxgloveTestClient(server.port)
+        client.subscribe(STREAM_TOPICS)
+        clients.append(client)
+        # The fake clock never sleeps, so give the server a moment to register
+        # the subscription before the episode starts.
+        import time as wall
+
+        wall.sleep(0.3)
+        return server
+
+    monkeypatch.setattr(cli, "start_stream", start_and_subscribe)
+    results = cli.run(
+        _streaming_config(tmp_path, num_episodes=2, reset_time_s=0.3),
+        make_robot=lambda _cfg: robot,
+        make_teleop=lambda _cfg: leader,
+        listen_keys=False,
+    )
+    [client] = clients
+    client.closed.wait(timeout=5)
+    client.close()
+
+    assert "Streaming live: open ws://127.0.0.1:" in capsys.readouterr().out
+    assert len(results) == 2
+    in_files = {topic: 0 for topic in STREAM_TOPICS}
+    for result in results:
+        with result.path.open("rb") as handle:
+            reader = make_reader(handle)
+            for _schema, channel, _message in reader.iter_messages(topics=STREAM_TOPICS):
+                in_files[channel.topic] += 1
+    assert all(count > 0 for count in in_files.values()), in_files
+    for topic in STREAM_TOPICS:
+        assert client.messages[topic], f"nothing streamed on {topic}"
+    # The reset phase streams state and action but writes no file.
+    assert len(client.messages["/observation/state"]) > in_files["/observation/state"]
+    state = json.loads(client.messages["/observation/state"][0])
+    assert [item["label"] for item in state["scalars"]] == list(state_names_for(robot, leader))
+    video = json.loads(client.messages["/observation/images/wrist"][0])
+    assert video["format"] == "h264" and video["data"]
+
+
+def test_cli_without_streaming_starts_no_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    time = FakeTime()
+    robot = FakeFollower(time, cameras=("wrist",))
+    leader = FakeLeader(time)
+    monkeypatch.setattr(cli, "record_episodes", _with_fake_clock(cli.record_episodes, time))
+
+    def no_server(_cfg, _context):
+        raise AssertionError("--stream=false must not start a server")
+
+    monkeypatch.setattr(cli, "start_stream", no_server)
+    [result] = cli.run(
+        _streaming_config(tmp_path, stream=False),
+        make_robot=lambda _cfg: robot,
+        make_teleop=lambda _cfg: leader,
+        listen_keys=False,
+    )
+    assert result.path.exists()
+
+
+def test_cli_stream_port_in_use_fails_before_the_arms_connect(tmp_path: Path) -> None:
+    import foxglove
+
+    time = FakeTime()
+    robot = FakeFollower(time, cameras=("wrist",))
+    leader = FakeLeader(time)
+    connected = []
+    robot.connect = lambda: connected.append("robot")  # type: ignore[method-assign]
+    leader.connect = lambda: connected.append("leader")  # type: ignore[method-assign]
+    taken = foxglove.start_server(name="other", port=0, context=foxglove.Context())
+    try:
+        with pytest.raises(RuntimeError, match="--stream=false"):
+            cli.run(
+                _streaming_config(tmp_path, stream_port=taken.port),
+                make_robot=lambda _cfg: robot,
+                make_teleop=lambda _cfg: leader,
+                listen_keys=False,
+            )
+    finally:
+        taken.stop()
+    assert connected == []
+    assert not list((tmp_path / "episodes").glob("*.mcap"))
 
 
 def test_cli_requires_a_task(tmp_path: Path) -> None:

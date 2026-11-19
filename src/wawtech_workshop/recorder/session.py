@@ -10,9 +10,10 @@ one channel per topic the converter reads:
 
 Each episode opens an MCAP sink on that context, so only messages logged
 between :meth:`RecordingSession.start_episode` and
-:meth:`RecordingSession.finish_episode` land in the file. An optional live
-WebSocket server on the same context shows the arm in Foxglove the whole time,
-including between episodes.
+:meth:`RecordingSession.finish_episode` land in the file. The recorder CLI
+also serves the same context over a Foxglove WebSocket server (on by default),
+so every message logged reaches both the MCAP file and the live view in
+Foxglove, which keeps streaming between episodes for teleop.
 
 H.264 encoding runs on one worker thread per camera so the control loop keeps
 its rate. A worker queue holds at most one second of frames; a frame that does

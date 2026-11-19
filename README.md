@@ -26,7 +26,7 @@ uv run record-episode \
   --teleop.type=rebot_102_leader --teleop.port=/dev/ttyUSB0 --teleop.id=leader \
   --task="Pick up the butter and put it on the plate" \
   --num_episodes=10 --episode_time_s=45 --reset_time_s=10 \
-  --output_dir=data/episodes --live_port=8765
+  --output_dir=data/episodes
 ```
 
 The leader, `rebot_102_leader`, is the reBot Arm 102 (Seeed's StarArm102): seven FashionStar UART servos read through `motorbridge-smart-servo`, which `lerobot[rebot]` installs. Its joint names and ranges match the B601 follower key for key. On its first connect it asks you to put the arm in its zero pose with the gripper closed, then saves that calibration under `--teleop.id`.
@@ -38,7 +38,9 @@ Cameras come from `--cameras` unless `--robot.cameras` is given:
 
 Both run at `--fps` and `--camera_width` x `--camera_height` (default 640x480). The camera names become the image topics and dataset features (`observation.images.wrist`), so switching to `wrist,front` later starts a dataset with a different shape: record the episodes for one training run with the same set. `--robot.cameras` overrides the presets entirely, as in `lerobot-record`.
 
-While it runs: `n` (or Right) ends the episode as a success, `f` as a failure, `r` (or Left) throws it away and records it again, `q` (or Esc) stops. An episode that runs out of time is saved with `--timeout_outcome` (default `success`). Between episodes the arm stays in teleop for `--reset_time_s` without recording; `n` skips the rest of the reset. With `--live_port`, open `ws://127.0.0.1:8765` in Foxglove to watch the arm and cameras live.
+While it runs: `n` (or Right) ends the episode as a success, `f` as a failure, `r` (or Left) throws it away and records it again, `q` (or Esc) stops. An episode that runs out of time is saved with `--timeout_outcome` (default `success`). Between episodes the arm stays in teleop for `--reset_time_s` without recording; `n` skips the rest of the reset.
+
+While recording, the same data streams live to Foxglove: open `ws://127.0.0.1:8765` in the app to watch the arm and cameras, including between episodes, which is the teleop view. Use `--stream_port` if 8765 is taken (the recorder stops before connecting the arms if it is), `--stream_host=0.0.0.0` to watch from another machine on the network, and `--stream=false` to record files only.
 
 Each tick logs the follower's joint positions on `/observation/state`, the leader's action on `/action/state` (before the follower's `max_relative_target` clipping, as `lerobot-record` does), and every RGB camera on `/observation/images/<name>` as H.264. Files are named `episode_NNNN_<session>.mcap`; the index continues from the files already in `--output_dir`. Each file carries the `episode` metadata record the converter checks and a `recording` record with the outcome. Depth streams are not recorded.
 
