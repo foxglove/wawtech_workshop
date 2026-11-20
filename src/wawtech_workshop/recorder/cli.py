@@ -27,6 +27,14 @@ recording doubles as the teleop view. ``--stream_port`` and ``--stream_host``
 move it (``--stream_host=0.0.0.0`` to watch from another machine), and
 ``--stream=false`` turns it off.
 
+Control from Foxglove: ``--control=foxglove`` (or ``both``, keys as well) waits
+in an idle teleop phase before every episode and records when the app calls the
+``/recorder/start`` service; ``/recorder/finish`` saves it, ``/recorder/discard``
+drops it. ``/recorder/status`` shows the state. ``docs/foxglove-layout.json``
+has buttons for all of it (regenerate with ``uv run python scripts/make_layout.py``).
+These controls have no authentication, so they only run with the stream on
+loopback. Add ``--episode_time_s=0`` so episodes last until you press finish.
+
 Files land in ``output_dir`` as ``episode_NNNN_<session>.mcap``. Pass them to
 ``build-dataset --mcap-dir`` directly, or to ``upload-episodes`` to put them in
 a Foxglove dataset.
@@ -62,6 +70,15 @@ from lerobot.utils.import_utils import register_third_party_plugins
 from lerobot.utils.keyboard_input import create_key_listener
 from lerobot_camera_orbbec import OrbbecCameraConfig
 
+from wawtech_workshop.recorder import urdf
+from wawtech_workshop.recorder.control import (
+    CONTROL_MODES,
+    StatusPublisher,
+    control_capabilities,
+    live_only_filter,
+    make_services,
+    require_loopback,
+)
 from wawtech_workshop.recorder.loop import (
     CONTROLS_HELP,
     SUCCESS,
@@ -99,6 +116,10 @@ class RecordEpisodeConfig:
     stream: bool = True
     stream_host: str = "127.0.0.1"
     stream_port: int = 8765
+    # Who ends and starts episodes: "keys" (keyboard, episodes follow each other),
+    # "foxglove" (services in the app, waits for a start before every episode), or
+    # "both". "foxglove" and "both" need the stream and a loopback --stream_host.
+    control: str = "keys"
     # Robot type written to the episode record. Must match build-dataset --robot-type.
     robot_type: str | None = None
     # Camera presets used when --robot.cameras is not given: "wrist" (UVC through
@@ -136,15 +157,24 @@ def preset_cameras(cfg: RecordEpisodeConfig) -> dict[str, CameraConfig]:
     return cameras
 
 
-def start_stream(cfg: RecordEpisodeConfig, context: foxglove.Context) -> Any:
+def start_stream(
+    cfg: RecordEpisodeConfig, context: foxglove.Context, controls: EpisodeControls | None = None
+) -> Any:
     """Serve ``context`` over the Foxglove WebSocket protocol, so every message the
-    recorder logs reaches both the episode MCAP and any connected Foxglove app."""
+    recorder logs reaches both the episode MCAP and any connected Foxglove app.
+    With ``controls``, the start/finish/discard/quit services go on the server."""
+    # The 3D panel's URDF layer fetches the arm model from the server.
+    urdf.check_assets()
+    extra: dict[str, Any] = {"asset_handler": urdf.make_asset_handler()}
+    if controls is not None:
+        extra.update(services=make_services(controls), capabilities=control_capabilities())
     try:
         server = foxglove.start_server(
             name="wawtech recorder",
             host=cfg.stream_host,
             port=cfg.stream_port,
             context=context,
+            **extra,
         )
     except RuntimeError as exc:
         raise RuntimeError(
@@ -165,6 +195,13 @@ def run(
 ) -> list:
     if not cfg.task.strip():
         raise ValueError("--task is required.")
+    if cfg.control not in CONTROL_MODES:
+        raise ValueError(f"--control must be one of {list(CONTROL_MODES)}, got {cfg.control!r}.")
+    foxglove_control = cfg.control in ("foxglove", "both")
+    if foxglove_control:
+        if not cfg.stream:
+            raise ValueError(f"--control={cfg.control} needs the stream; drop --stream=false.")
+        require_loopback(cfg.stream_host)
     if hasattr(cfg.robot, "cameras") and not cfg.robot.cameras:
         cfg.robot.cameras = preset_cameras(cfg)
     robot = make_robot(cfg.robot)
@@ -177,6 +214,7 @@ def run(
     controls = EpisodeControls()
     listener = None
     server = None
+    status = None
     try:
         with RecordingSession(
             output_dir=cfg.output_dir,
@@ -186,14 +224,22 @@ def run(
             camera_names=camera_names,
             lerobot_version=lerobot.__version__,
             session_id=cfg.session_id,
+            mcap_channel_filter=live_only_filter,
         ) as session:
             # Bind the stream before the arms connect, so a taken port fails
             # before torque is on rather than dropping a live arm.
             if cfg.stream:
-                server = start_stream(cfg, session.context)
+                if foxglove_control:
+                    # The status channel must exist before the server advertises channels.
+                    status = StatusPublisher(controls, session.context)
+                    server = start_stream(cfg, session.context, controls)
+                else:
+                    server = start_stream(cfg, session.context)
             teleop.connect()
             robot.connect()
-            if listen_keys:
+            if status is not None:
+                status.start()
+            if listen_keys and cfg.control != "foxglove":
                 listener = create_key_listener(controls.on_key, controls_help=CONTROLS_HELP)
             print(f"Joints: {', '.join(state_names)}. Cameras: {', '.join(camera_names)}.")
             results = record_episodes(
@@ -206,9 +252,12 @@ def run(
                 reset_time_s=cfg.reset_time_s,
                 start_index=start_index,
                 timeout_outcome=cfg.timeout_outcome,
+                wait_for_start=foxglove_control,
                 controls=controls,
             )
     finally:
+        if status is not None:
+            status.stop()
         if server is not None:
             server.stop()
         if listener is not None:

@@ -1,0 +1,387 @@
+{
+  "configById": {
+    "Indicator!001": {
+      "path": "/recorder/status.state",
+      "style": "background",
+      "fontSize": 36,
+      "rules": [
+        {
+          "rawValue": "recording",
+          "operator": "=",
+          "color": "#e15759",
+          "label": "RECORDING"
+        },
+        {
+          "rawValue": "idle",
+          "operator": "=",
+          "color": "#59a14f",
+          "label": "READY"
+        },
+        {
+          "rawValue": "resetting",
+          "operator": "=",
+          "color": "#f2c14e",
+          "label": "RESET"
+        },
+        {
+          "rawValue": "stopped",
+          "operator": "=",
+          "color": "#888888",
+          "label": "STOPPED"
+        }
+      ],
+      "fallbackColor": "#888888",
+      "fallbackLabel": "No recorder",
+      "foxglovePanelTitle": "Recorder"
+    },
+    "CallService!002": {
+      "serviceName": "/recorder/start",
+      "requestPayload": "{}",
+      "buttonText": "Start",
+      "buttonTooltip": "Begin the next episode (when ready)",
+      "buttonColor": "#59a14f",
+      "editingMode": false,
+      "timeoutSeconds": 5,
+      "foxglovePanelTitle": "Start"
+    },
+    "CallService!003": {
+      "serviceName": "/recorder/finish",
+      "requestPayload": "{\"outcome\": \"success\"}",
+      "buttonText": "Success",
+      "buttonTooltip": "Save as a success",
+      "buttonColor": "#59a14f",
+      "editingMode": false,
+      "timeoutSeconds": 5,
+      "foxglovePanelTitle": "Success"
+    },
+    "CallService!004": {
+      "serviceName": "/recorder/finish",
+      "requestPayload": "{\"outcome\": \"failure\"}",
+      "buttonText": "Failure",
+      "buttonTooltip": "Save as a failure",
+      "buttonColor": "#f2c14e",
+      "editingMode": false,
+      "timeoutSeconds": 5,
+      "foxglovePanelTitle": "Failure"
+    },
+    "CallService!005": {
+      "serviceName": "/recorder/discard",
+      "requestPayload": "{}",
+      "buttonText": "Discard",
+      "buttonTooltip": "Throw this episode away",
+      "buttonColor": "#e15759",
+      "editingMode": false,
+      "timeoutSeconds": 5,
+      "foxglovePanelTitle": "Discard"
+    },
+    "CallService!006": {
+      "serviceName": "/recorder/quit",
+      "requestPayload": "{}",
+      "buttonText": "Quit",
+      "buttonTooltip": "End the session; a running episode is saved",
+      "buttonColor": "#888888",
+      "editingMode": false,
+      "timeoutSeconds": 5,
+      "foxglovePanelTitle": "Quit"
+    },
+    "RawMessages!007": {
+      "expansion": "all",
+      "topicPath": "/recorder/status",
+      "foxglovePanelTitle": "Status"
+    },
+    "3D!008": {
+      "cameraState": {
+        "distance": 1.1,
+        "perspective": true,
+        "phi": 65,
+        "thetaOffset": 45,
+        "targetOffset": [
+          0,
+          0,
+          0.15
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "fovy": 45,
+        "near": 0.05,
+        "far": 5000
+      },
+      "followMode": "follow-none",
+      "followTf": "base_link",
+      "scene": {
+        "meshUpAxis": "z_up",
+        "transforms": {
+          "visible": false
+        }
+      },
+      "transforms": {},
+      "topics": {},
+      "layers": {
+        "grid": {
+          "layerId": "foxglove.Grid",
+          "instanceId": "rebot-grid",
+          "label": "Grid",
+          "visible": true,
+          "frameLocked": true,
+          "size": 1,
+          "divisions": 10,
+          "lineWidth": 1,
+          "color": "#248eff",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ]
+        },
+        "urdf": {
+          "layerId": "foxglove.Urdf",
+          "instanceId": "rebot-urdf",
+          "label": "reBot B601 (follower)",
+          "visible": true,
+          "frameLocked": true,
+          "sourceType": "filePath",
+          "url": "",
+          "filePath": "/Users/mat/projects/wawtech_workshop/assets/urdf/rebot-devarm_description_fixend/urdf/reBot-DevArm_fixend.urdf",
+          "controlMode": "jointStates",
+          "jointStatesTopic": "/joint_states",
+          "displayMode": "auto",
+          "fallbackColor": "#cccccc",
+          "showAxis": false,
+          "axisScale": 1,
+          "showOutlines": true,
+          "opacity": 1,
+          "framePrefix": "",
+          "parameter": "",
+          "topic": ""
+        },
+        "urdf_leader": {
+          "layerId": "foxglove.Urdf",
+          "instanceId": "rebot-urdf-leader",
+          "label": "Leader (ghost)",
+          "visible": true,
+          "frameLocked": true,
+          "sourceType": "filePath",
+          "url": "",
+          "filePath": "/Users/mat/projects/wawtech_workshop/assets/urdf/rebot-devarm_description_fixend/urdf/reBot-DevArm_fixend.urdf",
+          "controlMode": "jointStates",
+          "jointStatesTopic": "/action/joint_states",
+          "displayMode": "auto",
+          "fallbackColor": "#4e79a7",
+          "showAxis": false,
+          "axisScale": 1,
+          "showOutlines": false,
+          "opacity": 0.35,
+          "framePrefix": "",
+          "parameter": "",
+          "topic": ""
+        }
+      },
+      "publish": {
+        "type": "point"
+      },
+      "imageMode": {},
+      "foxglovePanelTitle": "Arm"
+    },
+    "Image!009": {
+      "imageMode": {
+        "imageTopic": "/observation/images/wrist"
+      },
+      "foxglovePanelTitle": "wrist"
+    },
+    "Image!00a": {
+      "imageMode": {
+        "imageTopic": "/observation/images/front"
+      },
+      "foxglovePanelTitle": "front"
+    },
+    "Plot!00b": {
+      "paths": [
+        {
+          "color": "#4e79a7",
+          "label": "shoulder_pan state",
+          "lineStyle": "solid",
+          "value": "/observation/state.scalars[:]{label==\"shoulder_pan.pos\"}.value",
+          "timestampMethod": "publishTime"
+        },
+        {
+          "color": "#4e79a7",
+          "label": "shoulder_pan action",
+          "lineStyle": "dashed",
+          "value": "/action/state.scalars[:]{label==\"shoulder_pan.pos\"}.value",
+          "timestampMethod": "publishTime"
+        },
+        {
+          "color": "#f28e2b",
+          "label": "shoulder_lift state",
+          "lineStyle": "solid",
+          "value": "/observation/state.scalars[:]{label==\"shoulder_lift.pos\"}.value",
+          "timestampMethod": "publishTime"
+        },
+        {
+          "color": "#f28e2b",
+          "label": "shoulder_lift action",
+          "lineStyle": "dashed",
+          "value": "/action/state.scalars[:]{label==\"shoulder_lift.pos\"}.value",
+          "timestampMethod": "publishTime"
+        },
+        {
+          "color": "#59a14f",
+          "label": "elbow_flex state",
+          "lineStyle": "solid",
+          "value": "/observation/state.scalars[:]{label==\"elbow_flex.pos\"}.value",
+          "timestampMethod": "publishTime"
+        },
+        {
+          "color": "#59a14f",
+          "label": "elbow_flex action",
+          "lineStyle": "dashed",
+          "value": "/action/state.scalars[:]{label==\"elbow_flex.pos\"}.value",
+          "timestampMethod": "publishTime"
+        },
+        {
+          "color": "#e15759",
+          "label": "wrist_flex state",
+          "lineStyle": "solid",
+          "value": "/observation/state.scalars[:]{label==\"wrist_flex.pos\"}.value",
+          "timestampMethod": "publishTime"
+        },
+        {
+          "color": "#e15759",
+          "label": "wrist_flex action",
+          "lineStyle": "dashed",
+          "value": "/action/state.scalars[:]{label==\"wrist_flex.pos\"}.value",
+          "timestampMethod": "publishTime"
+        },
+        {
+          "color": "#b07aa1",
+          "label": "wrist_yaw state",
+          "lineStyle": "solid",
+          "value": "/observation/state.scalars[:]{label==\"wrist_yaw.pos\"}.value",
+          "timestampMethod": "publishTime"
+        },
+        {
+          "color": "#b07aa1",
+          "label": "wrist_yaw action",
+          "lineStyle": "dashed",
+          "value": "/action/state.scalars[:]{label==\"wrist_yaw.pos\"}.value",
+          "timestampMethod": "publishTime"
+        },
+        {
+          "color": "#76b7b2",
+          "label": "wrist_roll state",
+          "lineStyle": "solid",
+          "value": "/observation/state.scalars[:]{label==\"wrist_roll.pos\"}.value",
+          "timestampMethod": "publishTime"
+        },
+        {
+          "color": "#76b7b2",
+          "label": "wrist_roll action",
+          "lineStyle": "dashed",
+          "value": "/action/state.scalars[:]{label==\"wrist_roll.pos\"}.value",
+          "timestampMethod": "publishTime"
+        }
+      ],
+      "minXValue": 0,
+      "maxXValue": 10,
+      "showLegend": true,
+      "foxglovePanelTitle": "Arm: state (solid) vs action (dashed)"
+    },
+    "Plot!00c": {
+      "paths": [
+        {
+          "color": "#4e79a7",
+          "label": "gripper state",
+          "lineStyle": "solid",
+          "value": "/observation/state.scalars[:]{label==\"gripper.pos\"}.value",
+          "timestampMethod": "publishTime"
+        },
+        {
+          "color": "#4e79a7",
+          "label": "gripper action",
+          "lineStyle": "dashed",
+          "value": "/action/state.scalars[:]{label==\"gripper.pos\"}.value",
+          "timestampMethod": "publishTime"
+        }
+      ],
+      "minXValue": 0,
+      "maxXValue": 10,
+      "showLegend": true,
+      "foxglovePanelTitle": "Gripper: state vs action"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "direction": "row",
+    "first": {
+      "direction": "column",
+      "first": "Indicator!001",
+      "second": {
+        "direction": "column",
+        "first": {
+          "direction": "column",
+          "first": "CallService!002",
+          "second": {
+            "direction": "column",
+            "first": "CallService!003",
+            "second": {
+              "direction": "column",
+              "first": "CallService!004",
+              "second": {
+                "direction": "column",
+                "first": "CallService!005",
+                "second": "CallService!006",
+                "splitPercentage": 50.0
+              },
+              "splitPercentage": 33.33
+            },
+            "splitPercentage": 25.0
+          },
+          "splitPercentage": 20.0
+        },
+        "second": "RawMessages!007",
+        "splitPercentage": 60.0
+      },
+      "splitPercentage": 16.67
+    },
+    "second": {
+      "direction": "column",
+      "first": {
+        "direction": "row",
+        "first": "3D!008",
+        "second": {
+          "direction": "row",
+          "first": "Image!009",
+          "second": "Image!00a",
+          "splitPercentage": 50.0
+        },
+        "splitPercentage": 33.33
+      },
+      "second": {
+        "direction": "row",
+        "first": "Plot!00b",
+        "second": "Plot!00c",
+        "splitPercentage": 50.0
+      },
+      "splitPercentage": 50.0
+    },
+    "splitPercentage": 20.0
+  }
+}

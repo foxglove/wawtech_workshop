@@ -30,13 +30,24 @@ import queue
 import re
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import foxglove
 import numpy as np
+from foxglove.channels import FrameTransformsChannel, JointStatesChannel
+from foxglove.messages import (
+    FrameTransform,
+    FrameTransforms,
+    JointState,
+    JointStates,
+    Quaternion,
+    Timestamp,
+    Vector3,
+)
 
 from wawtech_workshop.h264 import H264FrameEncoder
 from wawtech_workshop.mcap_schema import (
@@ -44,11 +55,15 @@ from wawtech_workshop.mcap_schema import (
     EPISODE_METADATA_NAME,
     RECORDING_METADATA_NAME,
     SCALARS_SCHEMA,
+    TOPIC_ACTION_JOINT_STATES,
     TOPIC_ACTION_STATE,
+    TOPIC_JOINT_STATES,
     TOPIC_OBSERVATION_STATE,
+    TOPIC_TF,
     EpisodeMetadata,
     image_topic,
 )
+from wawtech_workshop.recorder import urdf
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +196,7 @@ class RecordingSession:
         lerobot_version: str,
         session_id: str | None = None,
         context: foxglove.Context | None = None,
+        mcap_channel_filter: Callable[[Any], bool] | None = None,
     ) -> None:
         if fps <= 0:
             raise ValueError(f"fps must be positive, got {fps}.")
@@ -200,11 +216,30 @@ class RecordingSession:
                 f"session_id {self.session_id!r} may only use letters, digits and '-'."
             )
         self.context = context or foxglove.Context()
+        # Topics the live view has but episode files must not (e.g. recorder status).
+        self._mcap_channel_filter = mcap_channel_filter
         self._state = foxglove.Channel(
             TOPIC_OBSERVATION_STATE, schema=SCALARS_SCHEMA, context=self.context
         )
         self._action = foxglove.Channel(
             TOPIC_ACTION_STATE, schema=SCALARS_SCHEMA, context=self.context
+        )
+        # The arm model for the 3D panel: only joints the URDF has, if any.
+        self._urdf_joints = urdf.urdf_joint_names(self.state_names)
+        self._joint_states = (
+            JointStatesChannel(topic=TOPIC_JOINT_STATES, context=self.context)
+            if self._urdf_joints
+            else None
+        )
+        self._action_joint_states = (
+            JointStatesChannel(topic=TOPIC_ACTION_JOINT_STATES, context=self.context)
+            if self._urdf_joints
+            else None
+        )
+        self._tf = (
+            FrameTransformsChannel(topic=TOPIC_TF, context=self.context)
+            if self._urdf_joints
+            else None
         )
         self._cameras = {
             name: _CameraWorker(
@@ -232,6 +267,8 @@ class RecordingSession:
         """Log one control tick. Values are looked up by label; extra keys are ignored."""
         self._state.log(_scalars(self.state_names, state, "state"), log_time=log_time_ns)
         self._action.log(_scalars(self.state_names, action, "action"), log_time=log_time_ns)
+        if self._joint_states is not None and self._tf is not None:
+            self._log_arm_model(log_time_ns, state, action)
         for name, worker in self._cameras.items():
             if name not in images:
                 raise KeyError(f"Observation has no image for camera {name!r}.")
@@ -242,6 +279,34 @@ class RecordingSession:
             episode.steps += 1
             episode.first_ns = log_time_ns if episode.first_ns is None else episode.first_ns
             episode.last_ns = log_time_ns
+
+    def _log_arm_model(
+        self, log_time_ns: int, state: Mapping[str, float], action: Mapping[str, float]
+    ) -> None:
+        stamp = Timestamp(sec=log_time_ns // _NS, nsec=log_time_ns % _NS)
+        for channel, values in (
+            (self._joint_states, state),
+            (self._action_joint_states, action),
+        ):
+            joints = [
+                JointState(name=name, position=position)
+                for name, position in urdf.joint_positions_rad(self._urdf_joints, values)
+            ]
+            channel.log(JointStates(timestamp=stamp, joints=joints), log_time=log_time_ns)
+        self._tf.log(
+            FrameTransforms(
+                transforms=[
+                    FrameTransform(
+                        timestamp=stamp,
+                        parent_frame_id=urdf.WORLD_FRAME,
+                        child_frame_id=urdf.BASE_FRAME,
+                        translation=Vector3(x=0.0, y=0.0, z=0.0),
+                        rotation=Quaternion(x=0.0, y=0.0, z=0.0, w=1.0),
+                    )
+                ]
+            ),
+            log_time=log_time_ns,
+        )
 
     def start_episode(self, *, task: str, episode_index: int) -> Path:
         if self._episode is not None:
@@ -254,7 +319,9 @@ class RecordingSession:
             worker.reset_counters()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         path = self.output_dir / episode_filename(episode_index, self.session_id)
-        writer = foxglove.open_mcap(path, context=self.context)
+        writer = foxglove.open_mcap(
+            path, context=self.context, channel_filter=self._mcap_channel_filter
+        )
         self._episode = _OpenEpisode(
             path=path,
             writer=writer,

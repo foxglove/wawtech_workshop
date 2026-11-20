@@ -120,6 +120,10 @@ def test_episode_files_match_the_converter_contract(tmp_path: Path) -> None:
         "/action/state": ("lerobot.Scalars", "json"),
         "/observation/images/front": ("foxglove.CompressedVideo", "json"),
         "/observation/images/wrist": ("foxglove.CompressedVideo", "json"),
+        # The arm model for the 3D panel; the converter does not read these.
+        "/joint_states": ("foxglove.JointStates", "protobuf"),
+        "/action/joint_states": ("foxglove.JointStates", "protobuf"),
+        "/tf": ("foxglove.FrameTransforms", "protobuf"),
     }
     metadata = _metadata(first)
     episode = EpisodeMetadata.from_mcap_metadata(metadata[EPISODE_METADATA_NAME])

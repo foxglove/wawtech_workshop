@@ -17,6 +17,9 @@ from collections import defaultdict
 
 SUBPROTOCOL = "foxglove.sdk.v1"
 MESSAGE_DATA = 0x01
+SERVICE_CALL_REQUEST = 0x02
+SERVICE_CALL_RESPONSE = 0x03
+FETCH_ASSET_RESPONSE = 0x04
 
 
 class FoxgloveTestClient:
@@ -38,6 +41,11 @@ class FoxgloveTestClient:
             raise ConnectionError(head.decode(errors="replace"))
         self._lock = threading.Lock()
         self.channels: dict[str, int] = {}
+        self.services: dict[str, int] = {}
+        self._responses: dict[int, bytes] = {}
+        self._assets: dict[int, tuple[bool, bytes]] = {}
+        self.capabilities: list[str] = []
+        self._call_ids = 0
         self._subscriptions: dict[int, str] = {}
         self.messages: dict[str, list[bytes]] = defaultdict(list)
         self.closed = threading.Event()
@@ -72,6 +80,14 @@ class FoxgloveTestClient:
                 opcode, payload = self._read_frame()
                 if opcode == 0x1:
                     self._on_text(json.loads(payload))
+                elif opcode == 0x2 and payload[0] == FETCH_ASSET_RESPONSE:
+                    request_id, status, error_length = struct.unpack_from("<IBI", payload, 1)
+                    with self._lock:
+                        self._assets[request_id] = (status == 0, payload[10 + error_length :])
+                elif opcode == 0x2 and payload[0] == SERVICE_CALL_RESPONSE:
+                    service_id, call_id, encoding_length = struct.unpack_from("<III", payload, 1)
+                    with self._lock:
+                        self._responses[call_id] = payload[13 + encoding_length :]
                 elif opcode == 0x2 and payload[0] == MESSAGE_DATA:
                     (subscription,) = struct.unpack_from("<I", payload, 1)
                     with self._lock:
@@ -86,21 +102,66 @@ class FoxgloveTestClient:
             self.closed.set()
 
     def _on_text(self, message: dict) -> None:
+        if message.get("op") == "serverInfo":
+            self.capabilities = list(message.get("capabilities", []))
+        if message.get("op") == "advertiseServices":
+            with self._lock:
+                for service in message["services"]:
+                    self.services[service["name"]] = service["id"]
         if message.get("op") == "advertise":
             with self._lock:
                 for channel in message["channels"]:
                     self.channels[channel["topic"]] = channel["id"]
 
     def _send_text(self, text: str) -> None:
-        payload = text.encode()
+        self._send_frame(0x1, text.encode())
+
+    def _send_frame(self, opcode: int, payload: bytes) -> None:
         mask = os.urandom(4)
-        header = bytes([0x81])
+        header = bytes([0x80 | opcode])
         if len(payload) < 126:
             header += bytes([0x80 | len(payload)])
         else:
             header += bytes([0x80 | 126]) + struct.pack("!H", len(payload))
         masked = bytes(byte ^ mask[i % 4] for i, byte in enumerate(payload))
         self._sock.sendall(header + mask + masked)
+
+    def fetch_asset(self, uri: str, timeout: float = 5.0) -> bytes | None:
+        """Ask the server for a ``package://`` asset. None if the server refuses."""
+        self._call_ids += 1
+        request_id = self._call_ids
+        self._send_text(json.dumps({"op": "fetchAsset", "uri": uri, "requestId": request_id}))
+        deadline = time.monotonic() + timeout
+        while request_id not in self._assets:
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"no response for asset {uri}")
+            time.sleep(0.01)
+        ok, data = self._assets.pop(request_id)
+        return data if ok else None
+
+    def call_service(self, name: str, request: dict, timeout: float = 5.0) -> dict:
+        """Call a JSON service and return its decoded JSON response."""
+        deadline = time.monotonic() + timeout
+        while name not in self.services:
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"service not advertised: {name} (have {sorted(self.services)})")
+            time.sleep(0.01)
+        self._call_ids += 1
+        call_id = self._call_ids
+        encoding = b"json"
+        body = json.dumps(request).encode()
+        self._send_frame(
+            0x2,
+            bytes([SERVICE_CALL_REQUEST])
+            + struct.pack("<III", self.services[name], call_id, len(encoding))
+            + encoding
+            + body,
+        )
+        while call_id not in self._responses:
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"no response from {name}")
+            time.sleep(0.01)
+        return json.loads(self._responses.pop(call_id))
 
     def subscribe(self, topics: list[str], timeout: float = 5.0) -> None:
         deadline = time.monotonic() + timeout

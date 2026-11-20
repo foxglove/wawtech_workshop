@@ -40,7 +40,32 @@ Both run at `--fps` and `--camera_width` x `--camera_height` (default 640x480). 
 
 While it runs: `n` (or Right) ends the episode as a success, `f` as a failure, `r` (or Left) throws it away and records it again, `q` (or Esc) stops. An episode that runs out of time is saved with `--timeout_outcome` (default `success`). Between episodes the arm stays in teleop for `--reset_time_s` without recording; `n` skips the rest of the reset.
 
-While recording, the same data streams live to Foxglove: open `ws://127.0.0.1:8765` in the app to watch the arm and cameras, including between episodes, which is the teleop view. Use `--stream_port` if 8765 is taken (the recorder stops before connecting the arms if it is), `--stream_host=0.0.0.0` to watch from another machine on the network, and `--stream=false` to record files only.
+While recording, the same data streams live to Foxglove: open `ws://127.0.0.1:8765` in the app to watch the arm and cameras, including between episodes, which is the teleop view. Use `--stream_port` if 8765 is taken (the recorder stops before connecting the arms if it is), `--stream_host=0.0.0.0` to watch from another machine on the network (not with `--control=foxglove` or `both`), and `--stream=false` to record files only.
+
+### Start and finish from Foxglove
+
+With `--control=foxglove` (or `both`, which keeps the keys too) the recorder waits in teleop, not recording, before every episode, and the Foxglove app starts and ends it:
+
+```bash
+uv run record-episode ... --control=foxglove --episode_time_s=0 --reset_time_s=0
+```
+
+Connect to `ws://127.0.0.1:8765`, then import `docs/foxglove-layout.json` (Layouts menu, Import from file). It has a state light (READY, RECORDING, RESET), the `/recorder/status` message, camera images, state-vs-action plots and buttons that call these services:
+
+| Service | Request | Effect |
+|---|---|---|
+| `/recorder/start` | `{"task": "..."}` (task optional, and sticks for later episodes) | Begin the next episode. Only while ready. |
+| `/recorder/finish` | `{"outcome": "success" \| "failure"}` | Save the episode. |
+| `/recorder/discard` | `{}` | Throw it away and go back to ready. |
+| `/recorder/quit` | `{}` | Stop the session. A running episode is saved as a success. |
+
+A call that does not fit the state (finish while ready) is refused with `{"ok": false, "error": ...}` and changes nothing. The services only start and stop recording; they never move the arm. They have no authentication, so the recorder refuses them unless `--stream_host` is a loopback address. `--episode_time_s=0` makes an episode last until you press Success or Failure; otherwise it ends at the time limit with `--timeout_outcome`. `/recorder/status` is not written to the episode files. Regenerate the layout with `uv run python scripts/make_layout.py`.
+
+### See the arm move in Foxglove
+
+The recorder logs the follower's joint angles on `/joint_states` (`foxglove.JointStates`, radians, under the URDF's joint names `joint1` to `joint6`) and a fixed `world` to `base_link` frame on `/tf`, every tick. It also serves the arm model from `assets/urdf/` to the app, so there is nothing to download. The layout's **Arm** panel is a 3D panel whose URDF layer is in "Joint states" control mode, reading `/joint_states` from the recorder. The layer reads the URDF from disk (File path mode, desktop app only), so `docs/foxglove-layout.json` holds the absolute path of this checkout: regenerate it with `uv run python scripts/make_layout.py` after moving the repo or on another machine. `--urdf-source=url` makes it fetch the URDF from the running recorder instead (URL `package://rebot-devarm_description_fixend/urdf/reBot-DevArm_fixend.urdf`). To add the arm to your own layout: add a URDF layer in a 3D panel, set the source, Control mode to "Joint states" and the topic to `/joint_states`.
+
+The leader's action goes on `/action/joint_states` the same way, and the layout draws it as a second, 35% opaque blue **ghost** arm over the follower: where the leader is, against where the follower has got to. Toggle or restyle it from the layer's settings in the 3D panel. The gripper has no joint in the model, so it is not drawn. The topics are also written into every episode file, so a replayed or uploaded episode shows the arm too. The model is Seeed Studio's [reBot-DevArm](https://github.com/Seeed-Projects/reBot-DevArm) description (CERN-OHL-W 2.0), about 24 MB of meshes; see `assets/urdf/README.md`.
 
 Each tick logs the follower's joint positions on `/observation/state`, the leader's action on `/action/state` (before the follower's `max_relative_target` clipping, as `lerobot-record` does), and every RGB camera on `/observation/images/<name>` as H.264. Files are named `episode_NNNN_<session>.mcap`; the index continues from the files already in `--output_dir`. Each file carries the `episode` metadata record the converter checks and a `recording` record with the outcome. Depth streams are not recorded.
 
