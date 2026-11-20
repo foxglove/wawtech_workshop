@@ -14,7 +14,14 @@ from dataclasses import dataclass
 
 TOPIC_OBSERVATION_STATE = "/observation/state"
 TOPIC_ACTION_STATE = "/action/state"
+# For the 3D panel: the follower's URDF joint angles (radians) and a fixed base frame.
+TOPIC_JOINT_STATES = "/joint_states"
+# The leader's action in the same form, for a ghost arm next to the follower.
+TOPIC_ACTION_JOINT_STATES = "/action/joint_states"
+TOPIC_TF = "/tf"
 EPISODE_METADATA_NAME = "episode"
+# Recorder-only record: outcome label and session bookkeeping. The converter ignores it.
+RECORDING_METADATA_NAME = "recording"
 SCALARS_SCHEMA_NAME = "lerobot.Scalars"
 COMPRESSED_VIDEO_SCHEMA_NAME = "foxglove.CompressedVideo"
 

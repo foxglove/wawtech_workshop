@@ -115,9 +115,13 @@ def fetch_episodes(
     download_dir: Path | None,
     outcome_key: str = "outcome",
     keep_values: Sequence[str] = ("success",),
+    keep_unlabeled: bool = False,
     client_factory: ClientFactory | None = None,
 ) -> SelectionReport:
     """Select episodes by outcome and download the kept ones to ``download_dir``.
+
+    Episodes with no ``outcome_key`` property are excluded, unless
+    ``keep_unlabeled`` is set (for an org that has no outcome property yet).
 
     With ``download_dir`` set to None, only the selection is made and nothing is
     downloaded. Each kept episode is written to ``<download_dir>/<id>.mcap``
@@ -129,6 +133,8 @@ def fetch_episodes(
     def read_episode(episode: EpisodeReader) -> Iterator[tuple[str, EpisodeSummary]]:
         properties = dict(episode.properties)
         verdict = outcome_of(properties, outcome_key, keep_values)
+        if verdict == "unlabeled" and keep_unlabeled:
+            verdict = "kept"
         path = None
         if verdict == "kept" and download_dir is not None:
             path = _write_mcap(episode, download_dir / f"{episode.id}.mcap")

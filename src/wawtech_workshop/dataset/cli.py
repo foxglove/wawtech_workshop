@@ -8,12 +8,15 @@ import sys
 import tempfile
 from pathlib import Path
 
+from mcap.reader import make_reader
+
 from wawtech_workshop.dataset.convert import EpisodeInput, convert_episodes
 from wawtech_workshop.dataset.foxglove_source import (
     SelectionReport,
     default_topics,
     fetch_episodes,
 )
+from wawtech_workshop.mcap_schema import RECORDING_METADATA_NAME
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -35,10 +38,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--keep-outcomes",
         nargs="+",
         default=["success"],
-        help="Outcome property values to keep (default: success).",
+        help=(
+            "Outcomes to keep (default: success). With --dataset-id, the episode property; "
+            "with --mcap-dir, the outcome record-episode wrote."
+        ),
     )
     parser.add_argument(
         "--outcome-key", default="outcome", help="Episode property used as the outcome."
+    )
+    parser.add_argument(
+        "--keep-unlabeled",
+        action="store_true",
+        help=(
+            "With --dataset-id, also keep episodes that have no outcome property, for an "
+            "org without one. Curate the dataset version by hand first."
+        ),
     )
     parser.add_argument(
         "--project-dir",
@@ -66,8 +80,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cameras",
         nargs="+",
-        default=["front"],
-        help="Cameras to download with --dataset-id when --topics is unset (default: front).",
+        default=["wrist"],
+        help="Cameras to download with --dataset-id when --topics is unset (default: wrist).",
     )
     parser.add_argument("--robot-type", default="rebot_b601_follower")
     parser.add_argument("--max-gap-s", type=float, default=0.25)
@@ -123,6 +137,7 @@ def _run(argv: list[str] | None) -> None:
     paths = sorted(path for path in args.mcap_dir.glob("*.mcap") if path.is_file())
     if not paths:
         raise ValueError(f"No *.mcap files in {args.mcap_dir}.")
+    paths = _keep_recorded_outcomes(paths, set(args.keep_outcomes))
     convert_episodes(
         paths,
         args.output,
@@ -135,6 +150,31 @@ def _run(argv: list[str] | None) -> None:
     )
 
 
+def _keep_recorded_outcomes(paths: list[Path], keep: set[str]) -> list[Path]:
+    """Drop files whose ``recording`` record has an outcome outside ``keep``.
+
+    Files without that record (not written by ``record-episode``) are kept.
+    """
+    kept: list[Path] = []
+    for path in paths:
+        outcome = _recorded_outcome(path)
+        if outcome is not None and outcome not in keep:
+            print(f"skipping {path.name}: outcome {outcome!r}")
+            continue
+        kept.append(path)
+    if not kept:
+        raise ValueError(f"No episodes left after keeping outcomes {sorted(keep)}.")
+    return kept
+
+
+def _recorded_outcome(path: Path) -> str | None:
+    with path.open("rb") as handle:
+        for record in make_reader(handle).iter_metadata():
+            if record.name == RECORDING_METADATA_NAME:
+                return record.metadata.get("outcome")
+    return None
+
+
 def _fetch(args: argparse.Namespace, topics: list[str], directory: Path | None) -> SelectionReport:
     return fetch_episodes(
         args.dataset_id,
@@ -143,6 +183,7 @@ def _fetch(args: argparse.Namespace, topics: list[str], directory: Path | None) 
         download_dir=directory,
         outcome_key=args.outcome_key,
         keep_values=tuple(args.keep_outcomes),
+        keep_unlabeled=args.keep_unlabeled,
     )
 
 

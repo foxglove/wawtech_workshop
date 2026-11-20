@@ -12,3 +12,4 @@ data/
 outputs/
 *.mcap
 .uv/
+.DS_Store

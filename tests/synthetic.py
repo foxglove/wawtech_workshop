@@ -11,13 +11,12 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass
-from fractions import Fraction
 from pathlib import Path
 
-import av
 import numpy as np
 from mcap.writer import Writer
 
+from wawtech_workshop.h264 import encode_h264_frames
 from wawtech_workshop.mcap_schema import (
     COMPRESSED_VIDEO_SCHEMA,
     COMPRESSED_VIDEO_SCHEMA_NAME,
@@ -27,7 +26,6 @@ from wawtech_workshop.mcap_schema import (
     TOPIC_ACTION_STATE,
     TOPIC_OBSERVATION_STATE,
     EpisodeMetadata,
-    h264_codec_options,
     image_topic,
 )
 
@@ -85,68 +83,6 @@ def make_frame(index: int, height: int = FRAME_HEIGHT, width: int = FRAME_WIDTH)
     frame[:, :, 1] = np.linspace(0, 255, width, dtype=np.uint8)[None, :]
     frame[:, :, 2] = np.linspace(0, 255, height, dtype=np.uint8)[:, None]
     return np.ascontiguousarray(frame)
-
-
-def h264_encoder_name() -> str:
-    """Prefer libx264. Fall back to the first H.264 encoder this PyAV build can open."""
-    preferred = ("libx264", "h264", "libopenh264")
-    last_error: Exception | None = None
-    for name in preferred:
-        try:
-            _probe_encoder(name)
-        except Exception as exc:
-            last_error = exc
-            continue
-        return name
-    available = sorted(codec for codec in _encoder_names() if "264" in codec or codec == "h264")
-    raise RuntimeError(
-        "No H.264 encoder in this PyAV build. "
-        f"Tried {preferred}. Candidates: {available or '(none)'}. Last error: {last_error}"
-    )
-
-
-def _encoder_names() -> set[str]:
-    return {str(name) for name in av.codecs_available}
-
-
-def _probe_encoder(name: str) -> None:
-    codec = av.CodecContext.create(name, "w")
-    codec.width = 64
-    codec.height = 48
-    codec.pix_fmt = "yuv420p"
-    codec.time_base = Fraction(1, 30)
-    codec.open()
-
-
-def encode_h264_frames(frames: list[np.ndarray], fps: int) -> list[bytes]:
-    """Encode RGB frames to one Annex B packet blob per image, without B-frames."""
-    if not frames:
-        return []
-    height, width = frames[0].shape[:2]
-    if height % 2 or width % 2:
-        raise ValueError(f"H.264 yuv420p needs even dimensions, got {width}x{height}.")
-    encoder = h264_encoder_name()
-    codec = av.CodecContext.create(encoder, "w")
-    codec.width = width
-    codec.height = height
-    codec.pix_fmt = "yuv420p"
-    codec.time_base = Fraction(1, fps)
-    codec.framerate = Fraction(fps, 1)
-    codec.options = h264_codec_options(encoder)
-    codec.open()
-    blobs: list[bytes] = []
-    for index, rgb in enumerate(frames):
-        video = av.VideoFrame.from_ndarray(np.ascontiguousarray(rgb), format="rgb24")
-        video.pts = index
-        video.time_base = Fraction(1, fps)
-        pieces = [bytes(packet) for packet in codec.encode(video)]
-        if not pieces:
-            raise RuntimeError(f"Encoder {encoder} produced no packet for frame {index}.")
-        blobs.append(b"".join(pieces))
-    tail = b"".join(bytes(packet) for packet in codec.encode(None))
-    if tail:
-        blobs[-1] = blobs[-1] + tail
-    return blobs
 
 
 def write_synthetic_episode(

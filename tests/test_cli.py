@@ -75,6 +75,8 @@ def test_api_mode_uses_episode_task_property(
             "local/api-task",
             "--project-dir",
             str(tmp_path / "downloads"),
+            "--cameras",
+            "front",
         ]
     )
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
