@@ -483,6 +483,11 @@ torch = [
     { name = "pyarrow" },
     { name = "torch" },
 ]
+video = [
+    { name = "av" },
+    { name = "mcap" },
+    { name = "numpy" },
+]
 
 [[package]]
 name = "fsspec"
@@ -1928,7 +1933,7 @@ source = { editable = "." }
 dependencies = [
     { name = "av" },
     { name = "datasets" },
-    { name = "foxglove-sdk", extra = ["torch"] },
+    { name = "foxglove-sdk", extra = ["torch", "video"] },
     { name = "lerobot", extra = ["hardware", "rebot"] },
     { name = "lerobot-camera-orbbec" },
     { name = "mcap" },
@@ -1947,7 +1952,7 @@ dev = [
 requires-dist = [
     { name = "av", specifier = ">=15,<16" },
     { name = "datasets", specifier = ">=4.8.0,<6" },
-    { name = "foxglove-sdk", extras = ["torch"], specifier = "==0.31.0" },
+    { name = "foxglove-sdk", extras = ["torch", "video"], specifier = ">=0.31" },
     { name = "lerobot", extras = ["rebot", "hardware"], specifier = "==0.7.0" },
     { name = "lerobot-camera-orbbec", editable = "packages/lerobot_camera_orbbec" },
     { name = "mcap" },

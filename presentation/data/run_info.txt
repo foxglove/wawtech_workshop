@@ -1,0 +1,5 @@
+run=act_v2 started=2026-11-22T14:32:05+01:00 host=mat-B450-GAMING-X
+dataset=dset_0ek8nUJE8FYkiGun version=2 task=pass the butter steps=50000 batch=8
+NVIDIA GeForce RTX 2070 SUPER, 8192 MiB, 580.178.04
+torch 2.15.0+cu132 lerobot 0.7.0
+finished=2026-11-22T16:54:05+01:00

@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "lerobot[rebot,hardware]==0.7.0",
-    "foxglove-sdk[torch]==0.31.0",
+    "foxglove-sdk[torch,video]>=0.31",
     "lerobot_camera_orbbec",
     "mcap",
     "numpy",
