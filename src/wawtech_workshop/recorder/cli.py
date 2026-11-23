@@ -70,7 +70,6 @@ from lerobot.utils.import_utils import register_third_party_plugins
 from lerobot.utils.keyboard_input import create_key_listener
 from lerobot_camera_orbbec import OrbbecCameraConfig
 
-from wawtech_workshop.recorder import urdf
 from wawtech_workshop.recorder.control import (
     CONTROL_MODES,
     StatusPublisher,
@@ -88,6 +87,7 @@ from wawtech_workshop.recorder.loop import (
     state_names_for,
 )
 from wawtech_workshop.recorder.session import RecordingSession, next_episode_index
+from wawtech_workshop.recorder.stream import start_stream_server
 
 logger = logging.getLogger(__name__)
 
@@ -163,27 +163,15 @@ def start_stream(
     """Serve ``context`` over the Foxglove WebSocket protocol, so every message the
     recorder logs reaches both the episode MCAP and any connected Foxglove app.
     With ``controls``, the start/finish/discard/quit services go on the server."""
-    # The 3D panel's URDF layer fetches the arm model from the server.
-    urdf.check_assets()
-    extra: dict[str, Any] = {"asset_handler": urdf.make_asset_handler()}
-    if controls is not None:
-        extra.update(services=make_services(controls), capabilities=control_capabilities())
-    try:
-        server = foxglove.start_server(
-            name="wawtech recorder",
-            host=cfg.stream_host,
-            port=cfg.stream_port,
-            context=context,
-            **extra,
-        )
-    except RuntimeError as exc:
-        raise RuntimeError(
-            f"Could not stream on {cfg.stream_host}:{cfg.stream_port} ({exc}). Is another "
-            "recorder or lerobot-teleoperate using it? Pass --stream_port=<port>, or "
-            "--stream=false to record without streaming."
-        ) from exc
-    print(f"Streaming live: open ws://{cfg.stream_host}:{server.port} in Foxglove.")
-    return server
+    if controls is None:
+        return start_stream_server(context, cfg.stream_host, cfg.stream_port)
+    return start_stream_server(
+        context,
+        cfg.stream_host,
+        cfg.stream_port,
+        services=make_services(controls),
+        capabilities=control_capabilities(),
+    )
 
 
 def run(

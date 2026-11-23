@@ -171,9 +171,23 @@ uv run lerobot-rollout --strategy.type=base \
   --robot.control_mode=pos_vel --robot.pos_vel_velocity=30 --robot.max_relative_target=5 \
   --robot.cameras='{wrist: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}' \
   --policy.path=outputs/train/act_v2/checkpoints/050000/pretrained_model --policy.device=mps \
-  --task="pass the butter" --duration=20 \
+  --task="pass the butter" --duration=60 \
   --display_data=true --display_mode=foxglove
 ```
+
+To also keep an MCAP of the run, use `rollout-episode`, which is `lerobot-rollout` with an extra `--strategy.type=mcap` (see "Record a policy rollout" in the README). The flags are the same, except there is no `--display_data` or `--display_mode`: the strategy streams to Foxglove itself.
+
+```bash
+uv run rollout-episode --strategy.type=mcap \
+  --robot.type=rebot_b601_follower --robot.port=/dev/tty.usbmodem00000000050C1 \
+  --robot.id=follower --robot.can_adapter=damiao \
+  --robot.control_mode=pos_vel --robot.pos_vel_velocity=30 --robot.max_relative_target=5 \
+  --robot.cameras='{wrist: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}' \
+  --policy.path=outputs/train/act_v2/checkpoints/050000/pretrained_model --policy.device=mps \
+  --task="pass the butter" --duration=60
+```
+
+The file lands in `outputs/rollouts/rollout_NNNN_<session>.mcap`, unlabeled, with `source=policy`, the policy path and type in its `recording` metadata. Never put it in `data/episodes`, and never point `build-dataset --mcap-dir` at `outputs/rollouts`. `--strategy.stream=false` turns the live stream off, and `--strategy.stream_port` moves it from 8765.
 
 Not yet run on the arm. Read these before the first run:
 
@@ -181,6 +195,7 @@ Not yet run on the arm. Read these before the first run:
 - **Match training.** The camera must be named `wrist`, at 640x480 and 30 fps, mounted as it was for recording. A camera that moved, or different lighting, breaks the policy. Start the butter and plate where they were in the episodes.
 - **Which checkpoint.** Loss is only a guide, so run the same trials on `020000`, `035000` and `050000` by changing `--policy.path`, and keep the earliest one that does as well as the last. If the loss is better but the arm is not, the data is the problem (see Path A).
 - **Watch it in Foxglove.** `--display_mode=foxglove` serves a live view you can open as a WebSocket connection. Compare `/observation/state` with the policy's actions to see where they diverge.
+- **`--display_mode=foxglove` is replaced by `--strategy.stream`** when you use `rollout-episode`: a live stream of state, action, cameras and the 3D arm, on by default at `ws://127.0.0.1:8765`, and the same data goes into the recorded file. Passing `--display_data=true` with `--strategy.type=mcap` is rejected.
 - **If a flag is rejected,** run `uv run lerobot-rollout --help`. `--policy.device=mps` can be dropped, because it falls back by itself.
 
 ## Tradeoffs for 27 November
