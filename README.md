@@ -18,7 +18,7 @@ Shell shortcuts, each with `DRY_RUN=1` to print the command without running it. 
 
 | Script | What it does |
 |---|---|
-| `scripts/train.sh` | Records teleop episodes into `data/episodes` (the name is historical: it records, it does not train) |
+| `scripts/record.sh` | Records teleop episodes into `data/episodes` (the training data) |
 | `scripts/rollout.sh` | Runs a trained policy on the arm with plain `lerobot-rollout` (the command that works) |
 | `scripts/train_act.sh` | Builds the LeRobot dataset from a Foxglove dataset version and trains ACT, on the training PC |
 
@@ -39,7 +39,7 @@ uv run record-episode \
   --output_dir=data/episodes
 ```
 
-The ports above are Linux examples. On the Mac the follower is `/dev/tty.usbmodem…` and the leader `/dev/tty.usbserial…` (find them with `uv run lerobot-find-port`). `bash scripts/train.sh` runs the exact recording command used for the butter episodes, with this machine's ports as defaults. The script name is historical: it records episodes, it does not train.
+The ports above are Linux examples. On the Mac the follower is `/dev/tty.usbmodem…` and the leader `/dev/tty.usbserial…` (find them with `uv run lerobot-find-port`). `bash scripts/record.sh` runs the exact recording command used for the butter episodes, with this machine's ports as defaults.
 
 The leader, `rebot_102_leader`, is the reBot Arm 102 (Seeed's StarArm102): seven FashionStar UART servos read through `motorbridge-smart-servo`, which `lerobot[rebot]` installs. Its joint names and ranges match the B601 follower key for key. On its first connect it asks you to put the arm in its zero pose with the gripper closed, then saves that calibration under `--teleop.id`.
 

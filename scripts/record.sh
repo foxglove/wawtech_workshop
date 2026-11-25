@@ -2,10 +2,10 @@
 # Record teleop episodes (the training data) with the Foxglove stream and controls on.
 # This is the command the butter_pass episodes were recorded with.
 #
-#   bash scripts/train.sh                       # 60 episodes into data/episodes
-#   NUM_EPISODES=10 bash scripts/train.sh
-#   bash scripts/train.sh --cameras=wrist,front # extra flags go straight to record-episode
-#   DRY_RUN=1 bash scripts/train.sh             # print the command, touch nothing
+#   bash scripts/record.sh                       # 60 episodes into data/episodes
+#   NUM_EPISODES=10 bash scripts/record.sh
+#   bash scripts/record.sh --cameras=wrist,front # extra flags go straight to record-episode
+#   DRY_RUN=1 bash scripts/record.sh             # print the command, touch nothing
 #
 # Open ws://127.0.0.1:8765 in Foxglove and import docs/foxglove-layout.json. With
 # --control=foxglove each episode waits for the Start button; Finish (success or failure) or
