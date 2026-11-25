@@ -152,6 +152,16 @@ To set the org up later, run once with `--create-properties`: it creates `task` 
 
 Recording and `build-dataset --mcap-dir` never touch the Foxglove org, so the whole path from teleop to a LeRobot dataset works before the org exists.
 
+### Older recordings: camera video logged as JSON
+
+Foxglove semantic search only indexes `foxglove.CompressedVideo` when it is protobuf. Recordings made before the recorder used the typed `CompressedVideoChannel` hold the camera as JSON messages with base64 `data`, so Foxglove cannot index them. Convert them without re-recording:
+
+```bash
+uv run convert-video-protobuf data/episodes data/episodes_pb
+```
+
+Each `<name>.mcap` becomes `<name>_pb.mcap` in the new folder, and the originals are never modified. Everything is copied as it was (other channels, metadata, attachments); only the JSON `foxglove.CompressedVideo` channels are rewritten as protobuf, with the same topic, `frame_id`, `format`, frame bytes and timestamps. Each output is checked before it is kept (protobuf encoding, message counts, identical frame payloads, first frames decode) and the command prints one line per file and a total. It uploads nothing: delete the failed recordings in Foxglove, then run `upload-episodes data/episodes_pb`. The `_pb` files have new keys, so they do not clash with the old uploads.
+
 ## Auto-upload episodes with Foxlet (optional)
 
 Foxlet (Foxglove's upload agent, formerly the Foxglove Agent) watches a folder and uploads each new recording to your org, so episodes show up in Foxglove without running `upload-episodes`. **Not run in this repo yet:** these steps follow Foxglove's Foxlet docs (Nov 2026), and the Docker daemon was off when this was written. The image tag in step 3 is the latest release number, not a tag the docs name: check it with `docker pull`.
@@ -199,4 +209,4 @@ To read a dataset version instead, set `FOXGLOVE_API_TOKEN` (optional override: 
 
 Training options (ACT on one GPU, or a π₀.₅ fine-tune on Ray/Anyscale) are outlined in [docs/training.md](docs/training.md).
 
-Each episode MCAP carries `/observation/state`, `/action/state`, and `/observation/images/<camera>` (`foxglove.CompressedVideo`, JSON, `format` `h264`). The recorder also writes an `episode` metadata record. The SDK streams messages only, so episodes read from a dataset version do not carry that record, and the converter does not depend on it. When the record is present, its task and episode index are used and its labels and cameras are checked against the file. Otherwise the task comes from the episode `task` property, then from `--task`. Pass `--task` when neither source has one.
+Each episode MCAP carries `/observation/state`, `/action/state`, and `/observation/images/<camera>` (`foxglove.CompressedVideo`, protobuf, `format` `h264`; recordings from before that change hold the same fields as JSON, and the converter reads both). The recorder also writes an `episode` metadata record. The SDK streams messages only, so episodes read from a dataset version do not carry that record, and the converter does not depend on it. When the record is present, its task and episode index are used and its labels and cameras are checked against the file. Otherwise the task comes from the episode `task` property, then from `--task`. Pass `--task` when neither source has one.

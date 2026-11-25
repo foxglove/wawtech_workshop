@@ -5,8 +5,10 @@ one channel per topic the converter reads:
 
 * ``/observation/state`` and ``/action/state``: ``lerobot.Scalars`` JSON, labels
   in the robot's joint order (``shoulder_pan.pos`` ...).
-* ``/observation/images/<camera>``: ``foxglove.CompressedVideo`` JSON, H.264,
-  one keyframe per message (see :mod:`wawtech_workshop.h264`).
+* ``/observation/images/<camera>``: ``foxglove.CompressedVideo`` protobuf (a typed
+  ``CompressedVideoChannel``), H.264, one keyframe per message (see
+  :mod:`wawtech_workshop.h264`). Foxglove semantic search only indexes this
+  message when it is protobuf, so it must not go through a generic JSON channel.
 
 Each episode opens an MCAP sink on that context, so only messages logged
 between :meth:`RecordingSession.start_episode` and
@@ -23,7 +25,6 @@ converter rejects gaps over 0.25 s, so a long run of drops shows up there.
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import queue
@@ -38,8 +39,9 @@ from typing import Any
 
 import foxglove
 import numpy as np
-from foxglove.channels import FrameTransformsChannel, JointStatesChannel
+from foxglove.channels import CompressedVideoChannel, FrameTransformsChannel, JointStatesChannel
 from foxglove.messages import (
+    CompressedVideo,
     FrameTransform,
     FrameTransforms,
     JointState,
@@ -51,7 +53,6 @@ from foxglove.messages import (
 
 from wawtech_workshop.h264 import H264FrameEncoder
 from wawtech_workshop.mcap_schema import (
-    COMPRESSED_VIDEO_SCHEMA,
     EPISODE_METADATA_NAME,
     RECORDING_METADATA_NAME,
     SCALARS_SCHEMA,
@@ -98,7 +99,7 @@ def default_session_id() -> str:
 class _CameraWorker:
     """Encode one camera's frames off the control thread and log them."""
 
-    def __init__(self, name: str, channel: foxglove.Channel, fps: int) -> None:
+    def __init__(self, name: str, channel: CompressedVideoChannel, fps: int) -> None:
         self.name = name
         self.channel = channel
         self._fps = fps
@@ -155,12 +156,12 @@ class _CameraWorker:
         data = self._encoder.encode(rgb)
         sec, nsec = divmod(log_time_ns, _NS)
         self.channel.log(
-            {
-                "timestamp": {"sec": int(sec), "nsec": int(nsec)},
-                "frame_id": self.name,
-                "data": base64.b64encode(data).decode("ascii"),
-                "format": "h264",
-            },
+            CompressedVideo(
+                timestamp=Timestamp(sec=sec, nsec=nsec),
+                frame_id=self.name,
+                data=data,
+                format="h264",
+            ),
             log_time=log_time_ns,
         )
         self.encoded += 1
@@ -255,9 +256,7 @@ class RecordingSession:
         self._cameras = {
             name: _CameraWorker(
                 name,
-                foxglove.Channel(
-                    image_topic(name), schema=COMPRESSED_VIDEO_SCHEMA, context=self.context
-                ),
+                CompressedVideoChannel(topic=image_topic(name), context=self.context),
                 fps,
             )
             for name in self.camera_names

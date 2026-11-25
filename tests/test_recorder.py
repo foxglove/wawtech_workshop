@@ -12,6 +12,7 @@ from mcap.reader import make_reader
 
 from tests.fake_hardware import HEIGHT, WIDTH, FakeFollower, FakeLeader, FakeTime
 from tests.ws_client import FoxgloveTestClient
+from wawtech_workshop.compressed_video import parse_compressed_video
 from wawtech_workshop.dataset.convert import convert_episodes
 from wawtech_workshop.dataset.video import decode_h264_messages
 from wawtech_workshop.mcap_schema import (
@@ -118,8 +119,8 @@ def test_episode_files_match_the_converter_contract(tmp_path: Path) -> None:
     assert channels == {
         "/observation/state": ("lerobot.Scalars", "json"),
         "/action/state": ("lerobot.Scalars", "json"),
-        "/observation/images/front": ("foxglove.CompressedVideo", "json"),
-        "/observation/images/wrist": ("foxglove.CompressedVideo", "json"),
+        "/observation/images/front": ("foxglove.CompressedVideo", "protobuf"),
+        "/observation/images/wrist": ("foxglove.CompressedVideo", "protobuf"),
         # The arm model for the 3D panel; the converter does not read these.
         "/joint_states": ("foxglove.JointStates", "protobuf"),
         "/action/joint_states": ("foxglove.JointStates", "protobuf"),
@@ -153,7 +154,7 @@ def test_episode_files_match_the_converter_contract(tmp_path: Path) -> None:
 
     with first.open("rb") as handle:
         messages = [
-            (message.log_time, json.loads(message.data))
+            (message.log_time, parse_compressed_video(message.data))
             for _s, _c, message in make_reader(handle).iter_messages(
                 topics=["/observation/images/front"]
             )
@@ -351,7 +352,7 @@ def test_cli_streams_live_while_writing_the_mcap(
     assert len(client.messages["/observation/state"]) > in_files["/observation/state"]
     state = json.loads(client.messages["/observation/state"][0])
     assert [item["label"] for item in state["scalars"]] == list(state_names_for(robot, leader))
-    video = json.loads(client.messages["/observation/images/wrist"][0])
+    video = parse_compressed_video(client.messages["/observation/images/wrist"][0])
     assert video["format"] == "h264" and video["data"]
 
 

@@ -2,9 +2,9 @@
 
 Scalar topics use the ``lerobot.Scalars`` JSON schema from LeRobot's Foxglove
 integration. Camera topics carry ``foxglove.CompressedVideo`` messages with
-``format`` ``h264``. The recorder writes an ``episode`` metadata record. Episodes
-read through the Foxglove SDK's dataset reader carry messages only, so the
-converter does not depend on that record.
+``format`` ``h264``, protobuf-encoded (earlier recordings are JSON). The recorder
+writes an ``episode`` metadata record. Episodes read through the Foxglove SDK's
+dataset reader carry messages only, so the converter does not depend on that record.
 """
 
 from __future__ import annotations
@@ -44,6 +44,9 @@ SCALARS_SCHEMA: dict[str, object] = {
     },
 }
 
+# JSON schema for ``foxglove.CompressedVideo``. The recorder no longer uses it (it logs
+# protobuf, see ``recorder/session.py``); the test fixture writer still emits the
+# legacy JSON form, which the converter keeps reading.
 COMPRESSED_VIDEO_SCHEMA: dict[str, object] = {
     "title": "foxglove.CompressedVideo",
     "description": "A single frame of a compressed video bitstream",

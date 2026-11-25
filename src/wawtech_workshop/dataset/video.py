@@ -1,10 +1,11 @@
 """Decode ``foxglove.CompressedVideo`` H.264 messages with PyAV.
 
 ``foxglove.datasets.video.decode_h264`` only accepts a Foxglove dataset
-``EpisodeReader``. This module decodes the same message shape directly: JSON
-objects whose ``data`` is base64 text or raw bytes, ``format`` is ``h264``, and
-each message holds Annex B NAL units for one image with no B-frames. Keyframes
-must carry SPS and PPS, which is how the synthetic writer emits them.
+``EpisodeReader``. This module decodes the same message shape directly: dicts
+(see :mod:`wawtech_workshop.compressed_video`) whose ``data`` is base64 text or raw
+bytes and whose ``format`` is ``h264``. Each message holds Annex B NAL units for one
+image with no B-frames. Keyframes must carry SPS and PPS, which is how the synthetic
+writer emits them.
 
 Alignment uses the MCAP log time supplied by the caller. The embedded
 ``timestamp`` is accepted but not required for ordering.

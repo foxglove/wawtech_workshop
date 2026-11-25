@@ -43,6 +43,7 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.pyav_utils import detect_available_encoders_pyav
 from mcap.reader import make_reader
 
+from wawtech_workshop.compressed_video import load_compressed_video
 from wawtech_workshop.dataset.video import iter_decode_h264_messages
 from wawtech_workshop.mcap_schema import (
     COMPRESSED_VIDEO_SCHEMA_NAME,
@@ -253,11 +254,10 @@ def _scan_episode(
                     f"{path} topic {topic} schema is {getattr(schema, 'name', None)!r}, "
                     f"expected {COMPRESSED_VIDEO_SCHEMA_NAME!r}."
                 )
-            if channel.message_encoding != "json":
+            if channel.message_encoding not in ("json", "protobuf"):
                 raise ValueError(
-                    f"{path} topic {topic} message encoding is {channel.message_encoding!r}. "
-                    "This converter decodes JSON CompressedVideo messages "
-                    "(base64 data, or raw bytes once decoded); protobuf bytes are not parsed."
+                    f"{path} topic {topic} message encoding is {channel.message_encoding!r}; "
+                    "expected 'json' or 'protobuf'."
                 )
             camera_times.setdefault(camera_name, []).append(int(message.log_time))
     if state_labels is None or not state_rows:
@@ -546,23 +546,13 @@ def _iter_video_messages(
                     f"{episode.path} topic {topic} schema is {getattr(schema, 'name', None)!r}, "
                     f"expected {COMPRESSED_VIDEO_SCHEMA_NAME!r}."
                 )
-            if channel.message_encoding != "json":
-                raise ValueError(
-                    f"{episode.path} topic {topic} message encoding is "
-                    f"{channel.message_encoding!r}. This converter decodes JSON "
-                    "CompressedVideo messages (base64 data, or raw bytes once decoded); "
-                    "protobuf bytes are not parsed."
-                )
             try:
-                payload = json.loads(message.data)
-            except json.JSONDecodeError as exc:
+                payload = load_compressed_video(channel.message_encoding, message.data)
+            except ValueError as exc:
                 raise ValueError(
-                    f"Episode {episode.metadata.episode_index} topic {topic} is not JSON: {exc}"
+                    f"Episode {episode.metadata.episode_index} topic {topic} "
+                    f"({channel.message_encoding}): {exc}"
                 ) from exc
-            if not isinstance(payload, dict):
-                raise ValueError(
-                    f"Episode {episode.metadata.episode_index} topic {topic} was not a JSON object."
-                )
             yield int(message.log_time), payload
 
 
