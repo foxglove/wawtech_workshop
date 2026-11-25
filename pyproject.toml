@@ -25,6 +25,7 @@ build-dataset = "wawtech_workshop.dataset.cli:main"
 record-episode = "wawtech_workshop.recorder.cli:main"
 rollout-episode = "wawtech_workshop.rollout.cli:main"
 upload-episodes = "wawtech_workshop.upload:main"
+convert-video-protobuf = "wawtech_workshop.video_to_protobuf:main"
 
 [dependency-groups]
 dev = [

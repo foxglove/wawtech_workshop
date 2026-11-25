@@ -15,7 +15,6 @@ and ``InteractiveSession`` are not exercised: the test calls the same
 
 from __future__ import annotations
 
-import json
 import threading
 from pathlib import Path
 
@@ -32,6 +31,7 @@ from mcap.reader import make_reader
 from tests.fake_lerobot_robot import CAMERA, HEIGHT, JOINTS, WIDTH, WawtechFakeRobot
 from tests.test_recorder import _metadata, _scalars
 from tests.test_rollout import _parse_rollout, _topics
+from wawtech_workshop.compressed_video import parse_compressed_video
 from wawtech_workshop.dataset.video import decode_h264_messages
 from wawtech_workshop.mcap_schema import EPISODE_METADATA_NAME, RECORDING_METADATA_NAME
 from wawtech_workshop.rollout.strategy import McapStrategy
@@ -142,7 +142,7 @@ def _check_file(
 
     with path.open("rb") as handle:
         messages = [
-            (message.log_time, json.loads(message.data))
+            (message.log_time, parse_compressed_video(message.data))
             for _s, _c, message in make_reader(handle).iter_messages(
                 topics=[f"/observation/images/{CAMERA}"]
             )

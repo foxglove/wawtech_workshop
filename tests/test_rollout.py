@@ -8,7 +8,6 @@ arm), and the stubbed ``run`` calls ``_log_telemetry`` the way ``BaseStrategy.ru
 from __future__ import annotations
 
 import fnmatch
-import json
 import socket
 import sys
 import threading
@@ -31,6 +30,7 @@ from mcap.reader import make_reader
 from tests.fake_hardware import HEIGHT, WIDTH, FakeFollower, FakeTime
 from tests.test_recorder import _metadata, _scalars
 from tests.ws_client import FoxgloveTestClient
+from wawtech_workshop.compressed_video import parse_compressed_video
 from wawtech_workshop.dataset.video import decode_h264_messages
 from wawtech_workshop.mcap_schema import EPISODE_METADATA_NAME, RECORDING_METADATA_NAME
 from wawtech_workshop.recorder.session import (
@@ -307,7 +307,7 @@ def test_one_run_writes_one_rollout_file_with_the_teleop_topics(
 
     with path.open("rb") as handle:
         messages = [
-            (message.log_time, json.loads(message.data))
+            (message.log_time, parse_compressed_video(message.data))
             for _s, _c, message in make_reader(handle).iter_messages(
                 topics=[f"/observation/images/{CAMERA}"]
             )
