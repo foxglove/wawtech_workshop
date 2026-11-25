@@ -71,17 +71,36 @@ Each tick logs the follower's joint positions on `/observation/state`, the leade
 
 `--fps` (default 30) must match `build-dataset --fps`. At 640x480, each camera adds about 1.5 MB/s.
 
+## Run a policy on the arm
+
+This command works on the arm with the `act_v2` policy at checkpoint `050000`. It is plain `lerobot-rollout`, so it records nothing: the run is only streamed live to Foxglove (`ws://127.0.0.1:8765`).
+
+```bash
+uv run lerobot-rollout --strategy.type=base \
+    --robot.type=rebot_b601_follower --robot.port=/dev/tty.usbmodem00000000050C1 \
+    --robot.id=follower --robot.can_adapter=damiao \
+    --robot.cameras='{wrist: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}' \
+    --policy.path=outputs/train/act_v2/checkpoints/050000/pretrained_model \
+    --task="pass the butter" --duration=60 \
+    --display_data=true --display_mode=foxglove
+```
+
+It sets no `--robot.control_mode`, `--robot.pos_vel_velocity` or `--robot.max_relative_target`, so the robot runs in its default mode with no speed or per-command limit of its own. The arm has no hardware e-stop: keep a hand on the switched 24 V power strip. Find the port with `ls /dev/tty.usbmodem*`.
+
 ## Record a policy rollout
 
 `lerobot-rollout` runs a trained policy on the arm but has no MCAP output. `rollout-episode` is `lerobot-rollout` with one more strategy, `--strategy.type=mcap`, that writes each run to an MCAP file and streams it live to Foxglove. All other flags are `lerobot-rollout`'s:
 
 ```bash
 uv run rollout-episode --strategy.type=mcap \
-  --robot.type=rebot_b601_follower --robot.port=/dev/ttyACM0 --robot.id=follower \
+  --robot.type=rebot_b601_follower --robot.port=/dev/tty.usbmodem00000000050C1 \
+  --robot.id=follower --robot.can_adapter=damiao \
   --robot.cameras='{wrist: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}' \
   --policy.path=outputs/train/act_v2/checkpoints/050000/pretrained_model \
   --task="pass the butter" --duration=60
 ```
+
+These are the robot flags of the working command above, with `--strategy.type=mcap` in place of `base` and no `--display_data` or `--display_mode`. Unlike that command, `rollout-episode` has not been confirmed on the arm yet. `rollout-episode` ran on the arm and recorded correctly (all topics, no dropped frames), but the policy hesitated and could not pick up the object, which it does with the command above. The cause is not known yet. Use the command above for any run that matters until it is found. `docs/training.md` still shows `pos_vel` and the speed flags; treat them as untested.
 
 `--task` is required. `--strategy.type=mcap` supports `--interactive=true`; each `/start` segment then becomes its own file. `--display_data` is rejected (the strategy streams to Foxglove itself, see below), and so is any `--dataset.*` flag.
 
