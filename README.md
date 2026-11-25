@@ -14,6 +14,16 @@ uv run pytest
 uv run ruff check .
 ```
 
+Shell shortcuts, each with `DRY_RUN=1` to print the command without running it. Read the script header before the first run:
+
+| Script | What it does |
+|---|---|
+| `scripts/record.sh` | Records teleop episodes into `data/episodes` (the training data) |
+| `scripts/rollout.sh` | Runs a trained policy on the arm with plain `lerobot-rollout` (the command that works) |
+| `scripts/train_act.sh` | Builds the LeRobot dataset from a Foxglove dataset version and trains ACT, on the training PC |
+
+**Secrets.** Two files hold tokens, and both are gitignored: `.env` (`FOXGLOVE_API_TOKEN`, a Foxglove API key) and `foxlet.env` (the Foxlet device token). Copy `.env.example` or `foxlet.env.example` and fill in the value. Do not type a token into a command line or paste it into a doc, a PR or a chat, where it ends up in shell history or logs. Load `.env` into the current shell with `set -a; . ./.env; set +a`. If a token leaks, revoke it in Foxglove (Settings, API keys or device tokens) and make a new one.
+
 `uv sync` installs this package and the `lerobot_camera_orbbec` workspace member. `pyorbbecsdk2==2.1.3` pins an older PyAV; this project overrides that pin to `av>=15,<16`, which LeRobot 0.7's dataset writer requires. The Orbbec SDK itself does not import PyAV.
 
 ## Record episodes
@@ -28,6 +38,8 @@ uv run record-episode \
   --num_episodes=10 --episode_time_s=45 --reset_time_s=10 \
   --output_dir=data/episodes
 ```
+
+The ports above are Linux examples. On the Mac the follower is `/dev/tty.usbmodem…` and the leader `/dev/tty.usbserial…` (find them with `uv run lerobot-find-port`). `bash scripts/record.sh` runs the exact recording command used for the butter episodes, with this machine's ports as defaults.
 
 The leader, `rebot_102_leader`, is the reBot Arm 102 (Seeed's StarArm102): seven FashionStar UART servos read through `motorbridge-smart-servo`, which `lerobot[rebot]` installs. Its joint names and ranges match the B601 follower key for key. On its first connect it asks you to put the arm in its zero pose with the gripper closed, then saves that calibration under `--teleop.id`.
 
@@ -100,7 +112,9 @@ uv run rollout-episode --strategy.type=mcap \
   --task="pass the butter" --duration=60
 ```
 
-These are the robot flags of the working command above, with `--strategy.type=mcap` in place of `base` and no `--display_data` or `--display_mode`. Unlike that command, `rollout-episode` has not been confirmed on the arm yet. `rollout-episode` ran on the arm and recorded correctly (all topics, no dropped frames), but the policy hesitated and could not pick up the object, which it does with the command above. The cause is not known yet. Use the command above for any run that matters until it is found. `docs/training.md` still shows `pos_vel` and the speed flags; treat them as untested.
+These are the robot flags of the working command above, with `--strategy.type=mcap` in place of `base` and no `--display_data` or `--display_mode`.
+
+**Known issue: not safe to rely on yet.** On the arm, `rollout-episode` recorded correctly (all topics, no dropped frames), but the policy hesitated and could not pick up the butter, which it does with the plain `lerobot-rollout` command above. The cause is not known. Untested suspects: the `pos_vel` control mode (the training data was recorded in the default mode), and extra CPU load from the video encoders and the Foxglove server. Use `bash scripts/rollout.sh` for any run that matters until this is found.
 
 `--task` is required. `--strategy.type=mcap` supports `--interactive=true`; each `/start` segment then becomes its own file. `--display_data` is rejected (the strategy streams to Foxglove itself, see below), and so is any `--dataset.*` flag.
 
@@ -122,7 +136,7 @@ The live stream is on by default at `ws://127.0.0.1:8765`: `--strategy.stream_po
 ## Put episodes in a Foxglove dataset
 
 ```bash
-export FOXGLOVE_API_TOKEN=...
+set -a; . ./.env; set +a   # loads FOXGLOVE_API_TOKEN, see Secrets above
 uv run upload-episodes data/episodes --dry-run
 uv run upload-episodes data/episodes --dataset-id <dataset id>
 ```
@@ -137,6 +151,39 @@ The properties are set only if the org defines them as episode custom properties
 To set the org up later, run once with `--create-properties`: it creates `task` (string) and `outcome` (enum: `success`, `failure`). `--no-properties` skips properties altogether.
 
 Recording and `build-dataset --mcap-dir` never touch the Foxglove org, so the whole path from teleop to a LeRobot dataset works before the org exists.
+
+## Auto-upload episodes with Foxlet (optional)
+
+Foxlet (Foxglove's upload agent, formerly the Foxglove Agent) watches a folder and uploads each new recording to your org, so episodes show up in Foxglove without running `upload-episodes`. **Not run in this repo yet:** these steps follow Foxglove's Foxlet docs (Nov 2026), and the Docker daemon was off when this was written. The image tag in step 3 is the latest release number, not a tag the docs name: check it with `docker pull`.
+
+What it does and does not do:
+
+- It uploads files only. It does not set the `task` and `outcome` episode properties or stage dataset versions: `upload-episodes` does that. It uploads failed episodes as well. If you use both, expect each file to be uploaded twice unless you only let one of them touch it (whether the two dedupe is untested).
+- It ignores an MCAP that has no end marker yet, so an episode that is still being written is not picked up.
+- A recording is identified by its path under the watched folder. The docs do not say whether files already there when it first starts are uploaded.
+- One Foxlet per device. Each Foxlet needs its own device and token.
+
+Set it up:
+
+1. **Create a device token** (needs an org admin) at <https://app.foxglove.dev/~/settings/device-tokens>: Create device token, leave Device blank, Create, and copy the token now. A blank Device means the device is created on first start, with the name you give in `DEVICE_NAME`. If your org does not preapprove devices, an admin must Enable it at <https://app.foxglove.dev/~/devices> after the first start.
+2. **Make the config.** `cp foxlet.env.example foxlet.env` and paste the token. Do not use quotes in the file. It watches `.mcap` files and imports every match automatically (`WATCH_AUTO_IMPORT_PATTERN=**/*.mcap`).
+3. **Start Docker Desktop, then run it**, mounting only the episodes folder:
+
+   ```bash
+   mkdir -p data/episodes
+   docker run -d --name foxlet --restart unless-stopped \
+     --mount type=volume,src=foxglove-agent-index-storage,dst=/index \
+     --mount type=bind,src="$PWD/data/episodes",dst=/storage \
+     --env-file foxlet.env \
+     us-central1-docker.pkg.dev/foxglove-images/images/agent:1.9.0
+   ```
+
+   The volume keeps Foxlet's state between restarts. `-d`, `--name` and `--restart` are additions to the docs' command. Foxlet's docs mention no macOS support: the image is a Linux container run under Docker Desktop. If new episodes are not noticed, add `WATCH_USE_NOTIFY=false` to `foxlet.env` so it relies on its periodic scan (every 30 s) instead of file events. This is a suggestion, also untested.
+4. **Check it works.** `docker logs -f foxlet` shows its log, and the uploads appear at <https://app.foxglove.dev/~/recordings>. Record an episode and confirm the file shows up there.
+
+Keep rollouts out of Foxlet: mount only `data/episodes`, never a parent folder (see "Record a policy rollout").
+
+Stop it with `docker stop foxlet` and remove it with `docker rm foxlet`. To make it forget what it has uploaded, stop it and delete the `foxglove-agent-index-storage` volume (`docker volume rm foxglove-agent-index-storage`): per the docs it then re-scans every local file and reports it again.
 
 ## Build the LeRobot dataset
 
