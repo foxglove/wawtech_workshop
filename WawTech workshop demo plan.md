@@ -1,5 +1,7 @@
 # WawTech workshop demo plan
 
+> **Historical: written 18 Nov, before the recorder, the rollout tools and the training run existed.** Do not copy commands from this page. Known stale items: the recorder is `record-episode` (not `record-episodes`); policies run with `lerobot-rollout` (`lerobot-record --policy.path` does not work in LeRobot 0.7); the `pos_vel` speed flags are untested for rollouts; the dates and the Friday 27 workshop day have moved. Current commands are in `README.md`, `scripts/` and `docs/training.md`.
+
 Nov 18, 2026 · @Mat Sadowski
 
 ## Summary

@@ -1,6 +1,6 @@
 # Training on the recorded data: ACT on one GPU vs π₀.₅ on Ray/Anyscale
 
-Status: Path A (ACT on one GPU) has been run twice: on 6 episodes, and on the 67-episode `butter_pass` version 2 (below). Neither policy has been tested on the arm yet. Path B (π₀.₅ on Anyscale) is still an outline: no cloud job has been started and no Anyscale credits have been spent.
+Status: Path A (ACT on one GPU) has been run twice: on 6 episodes, and on the 67-episode `butter_pass` version 2 (below). The version 2 policy rolls out correctly on the arm with plain `lerobot-rollout` (`bash scripts/rollout.sh`). Path B (π₀.₅ on Anyscale) is still an outline: no cloud job has been started and no Anyscale credits have been spent.
 
 Both paths start from the same LeRobot v3 dataset:
 
@@ -21,7 +21,7 @@ Training needs extras the recording machine does not: `lerobot[training]` for bo
 `lerobot-train` needs the converted dataset above. For a custom loop, `wawtech_workshop.training_data` streams a committed dataset version straight into a DataLoader with the SDK's `read_dataset`, with no conversion step. Samples use LeRobot's keys (`observation.state`, `action`, `observation.images.wrist`, `task`) and the same 30 fps zero-order-hold alignment and `outcome == "success"` filter as `build-dataset`.
 
 ```bash
-export FOXGLOVE_API_TOKEN=...   # key with datasets.list and data.stream; never commit it
+set -a; . ./.env; set +a   # FOXGLOVE_API_TOKEN from .env: a key with datasets.list and data.stream, never committed
 uv run python -m wawtech_workshop.training_data --dataset-id dset_0ek8nUJE8FYkiGun --version 2 --task "pass the butter"
 ```
 
@@ -29,7 +29,9 @@ uv run python -m wawtech_workshop.training_data --dataset-id dset_0ek8nUJE8FYkiG
 from torch.utils.data import DataLoader
 from wawtech_workshop.training_data import SampleConfig, build_torch_dataset
 
-dataset = build_torch_dataset("dset_0ek8nUJE8FYkiGun", 2, SampleConfig(chunk_size=100))  # ACT chunks
+dataset = build_torch_dataset(
+    "dset_0ek8nUJE8FYkiGun", 2, SampleConfig(chunk_size=100)
+)  # ACT chunks
 loader = DataLoader(dataset, batch_size=8, num_workers=4)
 ```
 
@@ -45,7 +47,7 @@ lerobot-train \
   --output_dir=outputs/train/act_rebot
 ```
 
-- Small model (ImageNet-pretrained ResNet-18 backbone and a transformer, the rest trained from scratch on our episodes). Any recent 16–24 GB GPU works, including a workstation card or one cloud GPU.
+- Small model (ImageNet-pretrained ResNet-18 backbone and a transformer, the rest trained from scratch on our episodes). Our run used an 8 GB RTX 2070 SUPER (2.1 GB allocated, 5.5 GB peak), so most recent GPUs work, including one cloud GPU.
 - Standard for single-task pick and place on low-cost arms with roughly 50 demonstrations. It does not use the task text.
 - Low risk. If it fails, the cause is almost always the data (camera placement, inconsistent demos), which we can fix by recording again.
 
@@ -57,12 +59,14 @@ lerobot-train \
   --policy.type=pi05 --policy.pretrained_path=lerobot/pi05_base \
   --policy.dtype=bfloat16 --policy.gradient_checkpointing=true \
   --policy.device=cuda --policy.push_to_hub=false \
-  --batch_size=32 --steps=3000 \
+  --batch_size=64 --steps=30000 \
   --output_dir=outputs/train/pi05_rebot
 ```
 
-- 2B-parameter vision-language backbone plus a 300M action expert. A full fine-tune is sized for one 80 GB GPU (A100 or H100). To fit a smaller card, add `--policy.train_expert_only=true` or `--policy.freeze_vision_encoder=true`, or LoRA with `--policy.use_peft=true` (`lerobot[peft]`).
-- Needs a Hugging Face token that has accepted the gated PaliGemma licence (the tokenizer is `google/paligemma-3b-pt-224`).
+Not run here. The batch size and steps are the ones in LeRobot's π₀.₅ guide; lower both to fit a smaller GPU.
+
+- About 4B parameters in total (the figure on LeRobot's `pi05_base` model card; the π₀ paper gives 3.3B for π₀). openpi lists more than 70 GB of GPU memory for a full fine-tune, so one 80 GB GPU (A100 or H100), and about 22.5 GB with LoRA in its JAX version (LeRobot gives no figure). To fit a smaller card in LeRobot, add `--policy.train_expert_only=true` or `--policy.freeze_vision_encoder=true`, or LoRA with `--policy.use_peft=true` (`lerobot[peft]`).
+- Needs a Hugging Face token that has accepted the gated PaliGemma licence (the tokenizer is `google/paligemma-3b-pt-224`). The `pi05_base` model card is tagged `gemma`, not Apache-2.0: read its terms before using the weights beyond the demo.
 - π₀.₅ was pretrained with three camera views. With the wrist camera alone, `--policy.empty_cameras=2` pads the missing views (`1` with wrist and front). A wrist-only view is the weakest setup for either policy, since nothing sees where the object is before the gripper is close: if the Orbbec arrives, record the training episodes with `--cameras=wrist,front`.
 - Uses the task string, so one checkpoint can take several tasks (for example "pick up the butter" and "put the butter on the plate").
 
@@ -92,7 +96,7 @@ The ACT run on `butter_pass` version 2 (dataset `dset_0ek8nUJE8FYkiGun`, 67 epis
 1. **Put the code and the token on the PC.** The PC's copy of the repo is a plain folder, not a git checkout. Use `tar` over ssh (the macOS `rsync` is `openrsync`, which reported success without copying here). `TRAIN_PC` is `user@address` of the PC:
 
    ```bash
-   TRAIN_PC=mat@<pc-address>
+   TRAIN_PC=<user>@<pc-address>
    tar --exclude __pycache__ -cf - src scripts | ssh $TRAIN_PC 'cd ~/wawtech_workshop && tar -xf -'
    ssh $TRAIN_PC 'umask 077; cat > ~/wawtech_workshop/.env' < .env   # FOXGLOVE_API_TOKEN, mode 600
    ```
@@ -162,51 +166,39 @@ print(device, tuple(action.shape), f"{(time.time() - start) * 1000:.0f} ms")
 
 On the laptop this printed `mps:0 (1, 7)`. A warm call that plans a new chunk took about 11 ms on `mps` and 63 ms on CPU; the very first call is slower (about 200 ms) from warm-up. That is fast enough for 30 fps control on the laptop.
 
-**2. Run it on the arm.** In LeRobot 0.7 policies run through `lerobot-rollout`. `lerobot-record` has no `--policy.*` flags there, so the `lerobot-record --policy.path` command in the demo plan does not work.
+**2. Run it on the arm.** In LeRobot 0.7 policies run through `lerobot-rollout`. `lerobot-record` has no `--policy.*` flags there, so the `lerobot-record --policy.path` command in the demo plan does not work. This is the command that works on the arm (the same one as `bash scripts/rollout.sh`, which adds checks that the port and the policy folder exist):
 
 ```bash
 uv run lerobot-rollout --strategy.type=base \
   --robot.type=rebot_b601_follower --robot.port=/dev/tty.usbmodem00000000050C1 \
   --robot.id=follower --robot.can_adapter=damiao \
-  --robot.control_mode=pos_vel --robot.pos_vel_velocity=30 --robot.max_relative_target=5 \
   --robot.cameras='{wrist: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}' \
-  --policy.path=outputs/train/act_v2/checkpoints/050000/pretrained_model --policy.device=mps \
+  --policy.path=outputs/train/act_v2/checkpoints/050000/pretrained_model \
   --task="pass the butter" --duration=60 \
   --display_data=true --display_mode=foxglove
 ```
 
-To also keep an MCAP of the run, use `rollout-episode`, which is `lerobot-rollout` with an extra `--strategy.type=mcap` (see "Record a policy rollout" in the README). The flags are the same, except there is no `--display_data` or `--display_mode`: the strategy streams to Foxglove itself.
+It sets no control mode or speed limits, so the arm runs in its default mode, as it did when the training episodes were recorded. A slower variant is possible but **untested**: add `--robot.control_mode=pos_vel --robot.pos_vel_velocity=30 --robot.max_relative_target=5` (joint speed in degrees per second, and the largest step per command in degrees). The values are conservative guesses. The training data was recorded in the default mode, so a `pos_vel` run may behave differently, and may be what made the `rollout-episode` runs hesitate (not confirmed). Try it only with a short `--duration`.
 
-```bash
-uv run rollout-episode --strategy.type=mcap \
-  --robot.type=rebot_b601_follower --robot.port=/dev/tty.usbmodem00000000050C1 \
-  --robot.id=follower --robot.can_adapter=damiao \
-  --robot.control_mode=pos_vel --robot.pos_vel_velocity=30 --robot.max_relative_target=5 \
-  --robot.cameras='{wrist: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}' \
-  --policy.path=outputs/train/act_v2/checkpoints/050000/pretrained_model --policy.device=mps \
-  --task="pass the butter" --duration=60
-```
+To also keep an MCAP of the run, use `rollout-episode`, which is `lerobot-rollout` with an extra `--strategy.type=mcap`. See "Record a policy rollout" in the README for the command and its known issue: on the arm the policy hesitated with it and could not pick up the butter, cause unknown. Use the command above for any run that matters.
 
-The file lands in `outputs/rollouts/rollout_NNNN_<session>.mcap`, unlabeled, with `source=policy`, the policy path and type in its `recording` metadata. Never put it in `data/episodes`, and never point `build-dataset --mcap-dir` at `outputs/rollouts`. `--strategy.stream=false` turns the live stream off, and `--strategy.stream_port` moves it from 8765.
+Read these before running:
 
-Not yet run on the arm. Read these before the first run:
-
-- **Safety.** The arm has no hardware e-stop: the switched 24 V power strip is the e-stop, and cutting power drops the arm under gravity. Keep a hand on the switch. `pos_vel_velocity=30` (degrees per second) and `max_relative_target=5` (degrees per command) are conservative starting values I chose, not tested ones; raise them only once the motion looks right. `--duration` is in seconds, and `0` runs until you stop it. Start with a short one.
+- **Safety.** The arm has no hardware e-stop: the switched 24 V power strip is the e-stop, and cutting power drops the arm under gravity. Keep a hand on the switch. `--duration` is in seconds, and `0` runs until you stop it. Start with a short one.
 - **Match training.** The camera must be named `wrist`, at 640x480 and 30 fps, mounted as it was for recording. A camera that moved, or different lighting, breaks the policy. Start the butter and plate where they were in the episodes.
-- **Which checkpoint.** Loss is only a guide, so run the same trials on `020000`, `035000` and `050000` by changing `--policy.path`, and keep the earliest one that does as well as the last. If the loss is better but the arm is not, the data is the problem (see Path A).
-- **Watch it in Foxglove.** `--display_mode=foxglove` serves a live view you can open as a WebSocket connection. Compare `/observation/state` with the policy's actions to see where they diverge.
-- **`--display_mode=foxglove` is replaced by `--strategy.stream`** when you use `rollout-episode`: a live stream of state, action, cameras and the 3D arm, on by default at `ws://127.0.0.1:8765`, and the same data goes into the recorded file. Passing `--display_data=true` with `--strategy.type=mcap` is rejected.
-- **If a flag is rejected,** run `uv run lerobot-rollout --help`. `--policy.device=mps` can be dropped, because it falls back by itself.
+- **Which checkpoint.** Loss is only a guide, so run the same trials on `020000`, `035000` and `050000` (for example `CHECKPOINT=035000 bash scripts/rollout.sh`) and keep the earliest one that does as well as the last. If the loss is better but the arm is not, the data is the problem (see Path A).
+- **Watch it in Foxglove.** `--display_mode=foxglove` serves a live view you can open as a WebSocket connection (`ws://127.0.0.1:8765`). Compare `/observation/state` with the policy's actions to see where they diverge.
+- **If a flag is rejected,** run `uv run lerobot-rollout --help`. `--policy.device=mps` can be added to force the Apple GPU, but it is not needed: the device falls back by itself.
 
-## Tradeoffs for 27 November
+## Tradeoffs: ACT or π₀.₅
 
 | | ACT, one GPU | π₀.₅, Anyscale |
 |---|---|---|
 | Setup | `lerobot-train` on any CUDA box | Job image, secrets, storage, gated model access |
-| Hardware | 16–24 GB GPU | 80 GB GPU (smaller with LoRA or frozen parts) |
-| Data needed | ~50 good demos, one task | Fewer demos per task can work; benefits from varied tasks |
-| Inference on the demo laptop | Real time on a laptop GPU | Needs a large GPU at the arm, or a policy server (`lerobot-policy-server`) over the network |
+| Hardware | 8 GB was enough for our run | 80 GB GPU (about 22.5 GB with LoRA in openpi, see above) |
+| Data needed | ~50 good demos, one task (we used 67) | Not tested by us. One independent test used 100 demos per task on an SO-101 (RoboColosseum, arXiv 2611.02497) |
+| Inference on the demo laptop | Real time on a laptop GPU | Needs a GPU at the arm (openpi lists more than 8 GB), or a policy server (`lerobot-policy-server`) over the network |
 | Risk | Low, well-trodden | Higher: first run on our data, first Anyscale job, network inference |
 | Story for the talk | Teleop to policy in one afternoon | Fine-tuning a foundation model from a Foxglove dataset |
 
-Recommendation: record once and train ACT first on a single GPU as the demo's guaranteed path. Run the π₀.₅ fine-tune on Anyscale in parallel from the same dataset version, and show it only if it rolls out reliably on the real arm by the 25th. The deciding question is inference: π₀.₅ needs a big GPU near the arm at run time, which the venue may not have.
+Recommendation: ACT on a single GPU is the baseline, and it is done (see above). π₀.₅ is the next step and has not been run. The deciding question is inference: π₀.₅ needs a GPU near the arm at run time, which a venue may not have.
