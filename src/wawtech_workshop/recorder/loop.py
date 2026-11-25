@@ -249,7 +249,7 @@ def run_phase(
             stamp,
             state=observation,
             action=action,
-            images={name: _as_rgb(observation[name]) for name in session.camera_names},
+            images={name: as_rgb(observation[name]) for name in session.camera_names},
         )
         ticks += 1
         remaining = period - (clock.monotonic() - tick_start)
@@ -262,7 +262,7 @@ def run_phase(
     return ticks
 
 
-def _as_rgb(image: Any) -> np.ndarray:
+def as_rgb(image: Any) -> np.ndarray:
     array = np.asarray(image)
     if array.dtype != np.uint8 or array.ndim != 3 or array.shape[2] != 3:
         raise ValueError(f"Camera frame must be HxWx3 uint8 RGB, got {array.shape} {array.dtype}.")

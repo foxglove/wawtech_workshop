@@ -71,6 +71,54 @@ Each tick logs the follower's joint positions on `/observation/state`, the leade
 
 `--fps` (default 30) must match `build-dataset --fps`. At 640x480, each camera adds about 1.5 MB/s.
 
+## Run a policy on the arm
+
+This command works on the arm with the `act_v2` policy at checkpoint `050000`. It is plain `lerobot-rollout`, so it records nothing: the run is only streamed live to Foxglove (`ws://127.0.0.1:8765`).
+
+```bash
+uv run lerobot-rollout --strategy.type=base \
+    --robot.type=rebot_b601_follower --robot.port=/dev/tty.usbmodem00000000050C1 \
+    --robot.id=follower --robot.can_adapter=damiao \
+    --robot.cameras='{wrist: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}' \
+    --policy.path=outputs/train/act_v2/checkpoints/050000/pretrained_model \
+    --task="pass the butter" --duration=60 \
+    --display_data=true --display_mode=foxglove
+```
+
+It sets no `--robot.control_mode`, `--robot.pos_vel_velocity` or `--robot.max_relative_target`, so the robot runs in its default mode with no speed or per-command limit of its own. The arm has no hardware e-stop: keep a hand on the switched 24 V power strip. Find the port with `ls /dev/tty.usbmodem*`.
+
+## Record a policy rollout
+
+`lerobot-rollout` runs a trained policy on the arm but has no MCAP output. `rollout-episode` is `lerobot-rollout` with one more strategy, `--strategy.type=mcap`, that writes each run to an MCAP file and streams it live to Foxglove. All other flags are `lerobot-rollout`'s:
+
+```bash
+uv run rollout-episode --strategy.type=mcap \
+  --robot.type=rebot_b601_follower --robot.port=/dev/tty.usbmodem00000000050C1 \
+  --robot.id=follower --robot.can_adapter=damiao \
+  --robot.cameras='{wrist: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}' \
+  --policy.path=outputs/train/act_v2/checkpoints/050000/pretrained_model \
+  --task="pass the butter" --duration=60
+```
+
+These are the robot flags of the working command above, with `--strategy.type=mcap` in place of `base` and no `--display_data` or `--display_mode`. Unlike that command, `rollout-episode` has not been confirmed on the arm yet. `rollout-episode` ran on the arm and recorded correctly (all topics, no dropped frames), but the policy hesitated and could not pick up the object, which it does with the command above. The cause is not known yet. Use the command above for any run that matters until it is found. `docs/training.md` still shows `pos_vel` and the speed flags; treat them as untested.
+
+`--task` is required. `--strategy.type=mcap` supports `--interactive=true`; each `/start` segment then becomes its own file. `--display_data` is rejected (the strategy streams to Foxglove itself, see below), and so is any `--dataset.*` flag.
+
+What a rollout file holds is what a teleop episode holds: `/observation/state`, `/action/state`, `/observation/images/<camera>` as H.264, `/joint_states`, `/action/joint_states` and `/tf`, in the same joint order as the policy's action. `/action/state` is the action the policy sent, before the robot's own `max_relative_target` clipping. With `--interpolation_multiplier` above 1 only the tick that carries the policy's own action is logged, so the file stays at `--fps`. The `episode` metadata record is the same, and the `recording` record has `source=policy`, `policy_path`, `policy_type`, `device` and `end_reason` (`completed` when `--duration` ran out, `stopped` when you stopped it with Ctrl-C, SIGTERM or `/stop`, `interrupted` for a raw `KeyboardInterrupt`, `error` when the run raised; a run that fails is still saved, which helps debugging). A run that logged no steps leaves no file.
+
+Files go to `outputs/rollouts` as `rollout_NNNN_<session>.mcap`. The index continues from the `rollout_*` files already there. Change the folder with `--strategy.output_dir`, and the file suffix with `--strategy.session_id`. Rollouts have no `outcome`: they are unlabeled, and you label them in Foxglove. To put one in Foxglove, pass its path (`upload-episodes` only reads `episode_*.mcap` from a folder):
+
+```bash
+uv run upload-episodes outputs/rollouts/rollout_0000_<session>.mcap --dry-run
+uv run upload-episodes outputs/rollouts/rollout_0000_<session>.mcap
+```
+
+Leave out `--dataset-id` unless you want the rollout staged in a training dataset.
+
+The live stream is on by default at `ws://127.0.0.1:8765`: `--strategy.stream_port`, `--strategy.stream_host` and `--strategy.stream=false` work like `--stream_port`, `--stream_host` and `--stream=false` of `record-episode`. Unlike `--display_mode=foxglove`, it serves the arm model and the same topics as the recorder, so the camera, plot and Arm panels of `docs/foxglove-layout.json` work as they are (the recorder's start and finish buttons and its status do nothing here, as there is no `/recorder/*` service). A taken port fails at startup, before the arm connects.
+
+**Keep rollouts out of the training data.** Foxlet uploads every `*.mcap` under the folder it is mounted on, so mount it only on `data/episodes`, and never put rollouts there. `build-dataset --mcap-dir` also reads every `*.mcap` in its folder and keeps files that have no outcome, so never point it at `outputs/rollouts`. The strategy refuses an `--strategy.output_dir` inside `data/` or in a folder that already holds `episode_*.mcap` files.
+
 ## Put episodes in a Foxglove dataset
 
 ```bash

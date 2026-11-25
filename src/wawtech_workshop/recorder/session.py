@@ -68,17 +68,23 @@ from wawtech_workshop.recorder import urdf
 logger = logging.getLogger(__name__)
 
 _NS = 1_000_000_000
+EPISODE_PREFIX = "episode"
 EPISODE_GLOB = "episode_*.mcap"
+# Policy rollouts (``rollout-episode``) use their own prefix, so they never match
+# EPISODE_GLOB and cannot be picked up as teleop episodes.
+ROLLOUT_PREFIX = "rollout"
+ROLLOUT_GLOB = "rollout_*.mcap"
 
 
-def episode_filename(episode_index: int, session_id: str) -> str:
-    return f"episode_{episode_index:04d}_{session_id}.mcap"
+def episode_filename(episode_index: int, session_id: str, prefix: str = EPISODE_PREFIX) -> str:
+    return f"{prefix}_{episode_index:04d}_{session_id}.mcap"
 
 
-def next_episode_index(output_dir: Path) -> int:
-    """One past the highest ``episode_NNNN_*.mcap`` index in ``output_dir``, or 0."""
+def next_episode_index(output_dir: Path, glob: str = EPISODE_GLOB) -> int:
+    """One past the highest ``<prefix>_NNNN_*.mcap`` index matching ``glob`` in ``output_dir``,
+    or 0. ``EPISODE_GLOB`` by default; ``ROLLOUT_GLOB`` for rollout files."""
     highest = -1
-    for path in output_dir.glob(EPISODE_GLOB):
+    for path in output_dir.glob(glob):
         parts = path.stem.split("_")
         if len(parts) >= 2 and parts[1].isdigit():
             highest = max(highest, int(parts[1]))
@@ -176,7 +182,8 @@ class _OpenEpisode:
 class EpisodeResult:
     path: Path
     episode_index: int
-    outcome: str
+    # None for an unlabeled episode (policy rollouts): the label is set in Foxglove.
+    outcome: str | None
     steps: int
     duration_s: float
     dropped_frames: dict[str, int] = field(default_factory=dict)
@@ -197,6 +204,7 @@ class RecordingSession:
         session_id: str | None = None,
         context: foxglove.Context | None = None,
         mcap_channel_filter: Callable[[Any], bool] | None = None,
+        file_prefix: str = EPISODE_PREFIX,
     ) -> None:
         if fps <= 0:
             raise ValueError(f"fps must be positive, got {fps}.")
@@ -215,6 +223,9 @@ class RecordingSession:
             raise ValueError(
                 f"session_id {self.session_id!r} may only use letters, digits and '-'."
             )
+        if not re.fullmatch(r"[A-Za-z0-9-]+", file_prefix):
+            raise ValueError(f"file_prefix {file_prefix!r} may only use letters, digits and '-'.")
+        self.file_prefix = file_prefix
         self.context = context or foxglove.Context()
         # Topics the live view has but episode files must not (e.g. recorder status).
         self._mcap_channel_filter = mcap_channel_filter
@@ -256,6 +267,11 @@ class RecordingSession:
     @property
     def recording(self) -> bool:
         return self._episode is not None
+
+    @property
+    def episode_steps(self) -> int:
+        """Steps logged into the open episode, 0 when none is open."""
+        return self._episode.steps if self._episode is not None else 0
 
     def log_step(
         self,
@@ -318,7 +334,7 @@ class RecordingSession:
             worker.drain()
             worker.reset_counters()
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        path = self.output_dir / episode_filename(episode_index, self.session_id)
+        path = self.output_dir / episode_filename(episode_index, self.session_id, self.file_prefix)
         writer = foxglove.open_mcap(
             path, context=self.context, channel_filter=self._mcap_channel_filter
         )
@@ -331,8 +347,23 @@ class RecordingSession:
         )
         return path
 
-    def finish_episode(self, outcome: str) -> EpisodeResult:
+    def finish_episode(
+        self, outcome: str | None, extra_metadata: Mapping[str, str] | None = None
+    ) -> EpisodeResult:
+        """Write the metadata records and close the file.
+
+        ``outcome=None`` leaves the ``outcome`` key out of the ``recording`` record
+        (an unlabeled episode). ``extra_metadata`` (str -> str) is merged into that
+        record; it may not reuse a key the session writes itself.
+        """
         episode = self._require_episode()
+        extra = dict(extra_metadata or {})
+        reserved = sorted(set(extra) & set(_RECORDING_KEYS))
+        if reserved:
+            raise ValueError(f"extra_metadata may not set the session's own keys {reserved}.")
+        bad = [key for key, value in extra.items() if not isinstance(value, str)]
+        if bad:
+            raise ValueError(f"extra_metadata values must be strings; fix {sorted(bad)}.")
         self._drain_cameras()
         dropped = {name: worker.dropped for name, worker in self._cameras.items()}
         metadata = EpisodeMetadata(
@@ -351,17 +382,20 @@ class RecordingSession:
         )
         try:
             episode.writer.write_metadata(EPISODE_METADATA_NAME, metadata.to_mcap_metadata())
-            episode.writer.write_metadata(
-                RECORDING_METADATA_NAME,
+            recording: dict[str, str] = {}
+            if outcome is not None:
+                recording["outcome"] = outcome
+            recording.update(
                 {
-                    "outcome": outcome,
                     "session_id": self.session_id,
                     "started_at": datetime.fromtimestamp(episode.started_ns / _NS, UTC).isoformat(),
                     "steps": str(episode.steps),
                     "duration_s": f"{duration_s:.3f}",
                     "dropped_frames": json.dumps(dropped, sort_keys=True),
-                },
+                }
             )
+            recording.update(extra)
+            episode.writer.write_metadata(RECORDING_METADATA_NAME, recording)
         finally:
             episode.writer.close()
             self._episode = None
@@ -412,6 +446,10 @@ class RecordingSession:
     def _drain_cameras(self) -> None:
         for worker in self._cameras.values():
             worker.drain()
+
+
+# Keys finish_episode writes to the ``recording`` record itself.
+_RECORDING_KEYS = ("outcome", "session_id", "started_at", "steps", "duration_s", "dropped_frames")
 
 
 def _scalars(labels: tuple[str, ...], values: Mapping[str, float], kind: str) -> dict:

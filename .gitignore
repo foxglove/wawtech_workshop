@@ -17,3 +17,7 @@ outputs/
 .DS_Store
 .env
 foxlet.env
+
+# Private planning notes for the workshop presentation (transcripts, drafts).
+workshop-plan/
+presentation
